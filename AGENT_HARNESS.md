@@ -24,6 +24,12 @@ This workspace starts as a new repository for a GPU-backed channel-emulation lay
 - Pair real-time data-path work with validation that checks timing, throughput, buffering, and IQ stream continuity.
 - Prefer configurable topology and per-link channel definitions over hard-coded endpoint pairs.
 - Keep private workstation connection details in ignored `.config`; keep only placeholder structure in tracked `.config.example`.
+- Treat the local repository as the canonical Git source and the remote workstation as a reproducible validation mirror; keep remote OCUDU checkouts, builds, logs, captures, datasets, and raw benchmark results outside tracked source unless deliberately promoted into docs or examples.
+- Keep remote GPU workstation dependency bootstrap user-space by default; do not rely on sudo or apt unless the user explicitly changes that constraint.
+- Load remote workstation settings through `scripts/remote/common.sh`; do not source `.config` directly from an interactive shell because `~/` values can expand against the local machine.
+- Run `scripts/remote/*.sh` helpers as Bash scripts, not by sourcing them from zsh, because the shared helper relies on Bash-specific `BASH_SOURCE`.
+- Treat strict realtime broker validation as failed when starvation, queue overflow, sequence gap, or ZMQ error counters are nonzero.
+- Keep CUDA/GPU channel emulation as the primary product target; describe CPU behavior only as reference, baseline, local development, or unported-model fallback.
 
 ## Handoff Condition
 
