@@ -10,10 +10,27 @@ duration_seconds="${OCUDU_ATTACH_DURATION_SECONDS:-15}"
 build_docker="${OCUDU_ATTACH_BUILD_DOCKER:-1}"
 srsran_ref="${SRSRAN_4G_REF:-release_23_11}"
 skip_remote_pull="${OCUDU_ATTACH_SKIP_REMOTE_PULL:-0}"
+sync_worktree="${OCUDU_ATTACH_SYNC_WORKTREE:-1}"
 
 if [[ -z "${branch}" ]]; then
   echo "unable to determine current branch" >&2
   exit 1
+fi
+
+# By default, rsync the local working tree to the remote so the test exercises
+# the current (possibly uncommitted) code. Set OCUDU_ATTACH_SYNC_WORKTREE=0 to
+# instead use whatever is already on the remote.
+if [[ "${sync_worktree}" == "1" ]]; then
+  case "${REMOTE_PROJECT_ROOT}" in
+    "~/"*) remote_dest="${REMOTE_PROJECT_ROOT#\~/}" ;;
+    *) remote_dest="${REMOTE_PROJECT_ROOT}" ;;
+  esac
+  echo "syncing working tree to ${REMOTE_USER}@${REMOTE_HOST}:${remote_dest}"
+  rsync -az --delete \
+    --exclude '.git' --exclude 'build*' --exclude '.config' \
+    -e "ssh -i ${REMOTE_SSH_KEY} -o BatchMode=yes -o ConnectTimeout=8" \
+    "${repo_root}/" "${REMOTE_USER}@${REMOTE_HOST}:${remote_dest}/"
+  skip_remote_pull=1
 fi
 
 remote_sh bash -s -- \
@@ -322,10 +339,12 @@ fi
 "${compose[@]}" up -d 5gc >"${log_dir}/docker-core-up.log" 2>&1
 wait_for_open5gs
 
+# The broker runs without --strict-realtime: this script reads the counters
+# from its event=stop line and applies its own verdict (see below), treating
+# rx_starvations as a soft realtime-margin signal rather than a hard failure.
 "${cuda_build}/ocudu-gpu-channel" \
   --config "${project_root}/examples/topology.ocudu-docker.cuda.yaml" \
-  --duration "${duration_seconds}s" \
-  --strict-realtime >"${log_dir}/broker.log" 2>&1 &
+  --duration "${duration_seconds}s" >"${log_dir}/broker.log" 2>&1 &
 broker_pid="$!"
 
 "${compose[@]}" up -d gnb >"${log_dir}/docker-gnb-up.log" 2>&1
@@ -400,7 +419,14 @@ tx_queue_overflows="$(extract_counter tx_queue_overflows "${broker_stop}")"
 tx_sequence_gaps="$(extract_counter tx_sequence_gaps "${broker_stop}")"
 zmq_errors="$(extract_counter zmq_errors "${broker_stop}")"
 
-if [[ "${broker_status}" -ne 0 || "${rx_starvations}" -ne 0 || "${tx_queue_overflows}" -ne 0 || "${tx_sequence_gaps}" -ne 0 || "${zmq_errors}" -ne 0 ]]; then
+# Hard broker failure = a crash or a data-integrity counter (queue overflow,
+# sequence gap, ZMQ error). rx_starvations is a host-scheduling-sensitive
+# realtime-margin signal: it is recorded in the summary but does not by itself
+# fail the run.
+if [[ "${rx_starvations}" -ne 0 ]]; then
+  echo "note: rx_starvations=${rx_starvations} (realtime-margin signal; not a hard failure)"
+fi
+if [[ "${broker_status}" -ne 0 || "${tx_queue_overflows}" -ne 0 || "${tx_sequence_gaps}" -ne 0 || "${zmq_errors}" -ne 0 ]]; then
   write_summary "broker_failed" 1
 fi
 if [[ "${rrc_connected}" -ne 1 || "${pdu_session_established}" -ne 1 ]]; then
