@@ -160,6 +160,11 @@ void CpuChannelProcessor::apply_chain_to_link(const std::string& link_key_value,
         // data is read directly from step.taps (the live ModelConfig) -- no
         // per-link cached copy; only the polyphase coefficient set and the
         // cross-slot ring live in StepState.
+        if (step.fading_enabled) {
+          throw std::runtime_error(
+              "tdl fading sub-config is not yet implemented on the CPU backend "
+              "(Phase 1.4a landed the schema; Phase 1.4b implements the kernel)");
+        }
         apply_tdl_step(current.data(), next.data(), current.size(),
                        step.taps, step_state.tdl_polyphase,
                        step_state.delay_line);

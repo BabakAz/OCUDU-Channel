@@ -22,16 +22,38 @@ enum class ModelStepType {
   Tdl
 };
 
-// One tap of a `tdl` (tapped delay line) chain step. `delay_samples` may be
-// fractional; sub-sample offsets resolve via a per-tap polyphase/sinc
-// interpolation kernel at processing time. `gain_db` and `phase_rad` together
-// give the complex tap weight a_k = 10^(gain_db/20) · exp(j·phase_rad). Two
-// taps with the same `delay_samples` are rejected by the validator -- collapse
-// them into one with the summed complex gain instead.
+// Doppler power spectrum shape applied to faded taps. Phase 1.4 implements the
+// Jakes (cosine-symmetric, classical) generator -- the canonical choice for
+// 3GPP TR 38.901 TDL profiles. Gaussian and Flat are reserved in the enum so
+// the YAML schema accepts them and a later phase can drop in their generator
+// math; today they throw "not yet implemented" at processor build time.
+enum class FadingSpectrum {
+  Jakes,
+  Gaussian,
+  Flat
+};
+
+// One tap of a `tdl` (tapped delay line) chain step. When the parent step has
+// no `fading:` sub-config, the tap's complex weight is the time-invariant
+//   a_k = 10^(gain_db/20) · exp(j·phase_rad).
+// When fading is enabled on the parent step, `gain_db` is reinterpreted as the
+// tap's mean power in dB (E[|a_k(t)|^2] = 10^(gain_db/10)) and the
+// instantaneous value evolves as a stationary stochastic process with a
+// Doppler-shaped autocorrelation. `is_los = true` adds a Rician specular path
+// to that tap: the deterministic component has Doppler shift
+// `f_d_max · cos(los_angle_rad)` and Rician K-factor `los_k_db` (linear
+// K = 10^(los_k_db/10)). LOS fields are ignored when the parent step has no
+// fading sub-config.
+//
+// Two taps with the same `delay_samples` are rejected by the validator --
+// collapse them into one with the summed complex gain instead.
 struct TapSpec {
   double delay_samples = 0.0;
   double gain_db = 0.0;
   double phase_rad = 0.0;
+  bool is_los = false;
+  double los_k_db = 0.0;
+  double los_angle_rad = 0.0;
 };
 
 struct RuntimeConfig {
@@ -99,6 +121,19 @@ struct ModelStep {
   // latter on non-tdl steps -- otherwise an empty `taps:` block on `gain` would
   // be silently swallowed.
   bool taps_declared = false;
+  // Fading sub-config (Phase 1.4). When `fading_enabled` is true on a `tdl`
+  // step, every tap's gain becomes a time-varying stochastic process with the
+  // chosen Doppler power spectrum. `fading_f_d_max_hz` is the per-LINK maximum
+  // Doppler frequency (v · f_c / c) -- all taps share it; per-tap variation
+  // comes from random sub-ray angle draws keyed by Philox at prepare time.
+  // `fading_grid_us` is the coarse-grid stride at which g_k(t) is sampled
+  // before linear interpolation up to per-sample resolution; default 1.0 us
+  // (~kHz) keeps interpolation error well below the AWGN floor for any
+  // practical f_d_max while bounding the kernel's sinusoid count.
+  bool fading_enabled = false;
+  double fading_f_d_max_hz = 0.0;
+  FadingSpectrum fading_spectrum = FadingSpectrum::Jakes;
+  double fading_grid_us = 1.0;
 };
 
 struct ModelConfig {

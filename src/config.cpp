@@ -166,6 +166,17 @@ void apply_step(ModelStep& step, const std::string& key, const std::string& valu
   }
 }
 
+bool parse_bool(const std::string& value, const std::string& key)
+{
+  if (value == "true" || value == "True" || value == "TRUE" || value == "1") {
+    return true;
+  }
+  if (value == "false" || value == "False" || value == "FALSE" || value == "0") {
+    return false;
+  }
+  throw std::runtime_error("invalid boolean value for " + key + ": " + value);
+}
+
 void apply_tap(TapSpec& tap, const std::string& key, const std::string& value)
 {
   if (key == "delay_samples") {
@@ -174,8 +185,41 @@ void apply_tap(TapSpec& tap, const std::string& key, const std::string& value)
     tap.gain_db = parse_double(value, key);
   } else if (key == "phase_rad") {
     tap.phase_rad = parse_double(value, key);
+  } else if (key == "is_los") {
+    tap.is_los = parse_bool(value, key);
+  } else if (key == "los_k_db") {
+    tap.los_k_db = parse_double(value, key);
+  } else if (key == "los_angle_rad") {
+    tap.los_angle_rad = parse_double(value, key);
   } else {
     throw std::runtime_error("unknown tap key: " + key);
+  }
+}
+
+FadingSpectrum parse_fading_spectrum(const std::string& value)
+{
+  if (value == "jakes") {
+    return FadingSpectrum::Jakes;
+  }
+  if (value == "gaussian") {
+    return FadingSpectrum::Gaussian;
+  }
+  if (value == "flat") {
+    return FadingSpectrum::Flat;
+  }
+  throw std::runtime_error("unsupported fading spectrum: " + value);
+}
+
+void apply_fading_key(ModelStep& step, const std::string& key, const std::string& value)
+{
+  if (key == "f_d_max_hz") {
+    step.fading_f_d_max_hz = parse_double(value, key);
+  } else if (key == "spectrum") {
+    step.fading_spectrum = parse_fading_spectrum(value);
+  } else if (key == "grid_us") {
+    step.fading_grid_us = parse_double(value, key);
+  } else {
+    throw std::runtime_error("unknown fading key: " + key);
   }
 }
 
@@ -221,6 +265,11 @@ TopologyConfig load_config_file(const std::string& path)
   // indent continue the most recent tap. Reset on every new step / model.
   bool current_step_in_taps = false;
   TapSpec* current_tap = nullptr;
+  // Set when the parser is inside a `fading:` block of `current_step`. Subsequent
+  // key-value lines at indent 10 fill the step's fading sub-config fields. The
+  // `fading:` block and the `taps:` block are siblings under a chain step and
+  // are mutually exclusive at any one moment in the parse.
+  bool current_step_in_fading = false;
 
   std::string raw_line;
   unsigned line_number = 0;
@@ -271,6 +320,7 @@ TopologyConfig load_config_file(const std::string& path)
       current_step = nullptr;
       current_step_in_taps = false;
       current_tap = nullptr;
+      current_step_in_fading = false;
       if (line == "runtime:") {
         section = Section::Runtime;
       } else if (line == "devices:") {
@@ -322,10 +372,13 @@ TopologyConfig load_config_file(const std::string& path)
     }
 
     if (section == Section::Models) {
-      // Two structural levels live below `models:` — `chain:` lists steps, and
-      // a `tdl` step may carry its own nested `taps:` list. The parser keys
-      // structural decisions off the indent column so a `- delay_samples:` line
-      // at the tap level is not misread as a new step at the step level.
+      // Three structural levels live below `models:` — `chain:` lists steps,
+      // a `tdl` step may carry a nested `taps:` list AND a nested `fading:`
+      // sub-config block. The parser keys structural decisions off the indent
+      // column so a `- delay_samples:` line at the tap level is not misread
+      // as a new step at the step level. `taps:` and `fading:` are sibling
+      // blocks at indent 8 and are mutually exclusive at any one moment in
+      // the parse.
       if (indent == 2 && line.ends_with(':')) {
         std::string model_id = line.substr(0, line.size() - 1);
         ModelConfig model;
@@ -335,15 +388,18 @@ TopologyConfig load_config_file(const std::string& path)
         current_step = nullptr;
         current_step_in_taps = false;
         current_tap = nullptr;
+        current_step_in_fading = false;
       } else if (current_model != nullptr && line == "chain:") {
         current_step = nullptr;
         current_step_in_taps = false;
         current_tap = nullptr;
+        current_step_in_fading = false;
       } else if (current_model != nullptr && indent == 6 && line.rfind("- ", 0) == 0) {
         current_model->chain.emplace_back();
         current_step = &current_model->chain.back();
         current_step_in_taps = false;
         current_tap = nullptr;
+        current_step_in_fading = false;
         auto [key, value] = split_key_value(trim(line.substr(2)));
         apply_step(*current_step, key, value);
       } else if (current_step != nullptr && indent == 8 && line == "taps:") {
@@ -354,7 +410,17 @@ TopologyConfig load_config_file(const std::string& path)
         // be declared on a later line).
         current_step_in_taps = true;
         current_tap = nullptr;
+        current_step_in_fading = false;
         current_step->taps_declared = true;
+      } else if (current_step != nullptr && indent == 8 && line == "fading:") {
+        // Open the fading sub-config block. Subsequent key-value lines at
+        // indent 10 fill the step's fading_* fields. Marking
+        // fading_enabled = true here lets the validator catch a fading block
+        // declared on a non-tdl step even if the body is empty.
+        current_step_in_fading = true;
+        current_step_in_taps = false;
+        current_tap = nullptr;
+        current_step->fading_enabled = true;
       } else if (current_step != nullptr && current_step_in_taps && indent == 10 &&
                  line.rfind("- ", 0) == 0) {
         current_step->taps.emplace_back();
@@ -364,7 +430,11 @@ TopologyConfig load_config_file(const std::string& path)
       } else if (current_tap != nullptr && current_step_in_taps && indent == 12) {
         auto [key, value] = split_key_value(line);
         apply_tap(*current_tap, key, value);
-      } else if (current_step != nullptr && indent == 8 && !current_step_in_taps) {
+      } else if (current_step != nullptr && current_step_in_fading && indent == 10) {
+        auto [key, value] = split_key_value(line);
+        apply_fading_key(*current_step, key, value);
+      } else if (current_step != nullptr && indent == 8 && !current_step_in_taps &&
+                 !current_step_in_fading) {
         auto [key, value] = split_key_value(line);
         apply_step(*current_step, key, value);
       } else {
@@ -533,6 +603,32 @@ std::vector<std::string> validate_config(const TopologyConfig& config)
                                 std::to_string(tap.delay_samples) +
                                 "; collapse into a single tap with summed complex gain");
           }
+          if (tap.is_los && !step.fading_enabled) {
+            errors.emplace_back("model " + model_id +
+                                " tdl tap is_los is set but the step has no fading sub-config;"
+                                " a Rician specular component needs fading enabled");
+          }
+        }
+        // Fading sub-config sanity: f_d_max_hz non-negative and bounded so a
+        // YAML typo cannot blow up the coarse-grid sinusoid count; grid stride
+        // strictly positive so the linear interpolation has a defined step.
+        if (step.fading_enabled) {
+          constexpr double kMaxFdMaxHz = 1.0e5;  // 100 kHz -- 10x faster than any plausible UE
+          if (step.fading_f_d_max_hz < 0.0) {
+            errors.emplace_back("model " + model_id +
+                                " tdl fading f_d_max_hz must be non-negative");
+          }
+          if (step.fading_f_d_max_hz > kMaxFdMaxHz) {
+            errors.emplace_back("model " + model_id +
+                                " tdl fading f_d_max_hz=" +
+                                std::to_string(step.fading_f_d_max_hz) +
+                                " exceeds the validator cap of " +
+                                std::to_string(kMaxFdMaxHz) + " Hz");
+          }
+          if (!(step.fading_grid_us > 0.0)) {
+            errors.emplace_back("model " + model_id +
+                                " tdl fading grid_us must be strictly positive");
+          }
         }
       } else if (!step.taps.empty() || step.taps_declared) {
         // taps_declared catches the parser-silent case where a non-tdl step
@@ -540,6 +636,12 @@ std::vector<std::string> validate_config(const TopologyConfig& config)
         // empty so the non-empty branch above would miss it.
         errors.emplace_back("model " + model_id + " step " + to_string(step.type) +
                             " has a taps block but only tdl steps may carry one");
+      }
+      // fading sub-config is meaningful only on a tdl step (the LOS / Rician /
+      // Doppler-spectrum semantics are all multipath-tap-level concepts).
+      if (step.fading_enabled && step.type != ModelStepType::Tdl) {
+        errors.emplace_back("model " + model_id + " step " + to_string(step.type) +
+                            " has a fading block but only tdl steps may carry one");
       }
     }
   }

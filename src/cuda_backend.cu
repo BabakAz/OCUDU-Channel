@@ -69,6 +69,10 @@ struct LinkModelState {
   const std::vector<TapSpec>* tdl_taps = nullptr;  // borrowed view into ModelConfig::chain[0].taps
   std::vector<std::array<float, kTdlFracFilterTaps>> tdl_polyphase;
   std::vector<IqSample> delay_line;
+  // Phase 1.4 fading flag. Snapshotted from the chain-leading tdl step at
+  // configure time; stage_link throws "not yet implemented" when true on the
+  // 1.4a code path (1.4b replaces the throw with the actual kernel).
+  bool fading_enabled = false;
 };
 
 void init_model_state(LinkModelState& state, std::size_t steps, const std::string& seed_prefix)
@@ -189,6 +193,7 @@ void configure_leading_propagation(LinkModelState& state, const ModelConfig& mod
   state.tdl_taps = nullptr;
   state.tdl_polyphase.clear();
   state.delay_line.clear();
+  state.fading_enabled = false;
   if (model.chain.empty()) {
     return;
   }
@@ -196,6 +201,7 @@ void configure_leading_propagation(LinkModelState& state, const ModelConfig& mod
   if (first.type == ModelStepType::Tdl) {
     state.has_tdl = true;
     state.tdl_taps = &first.taps;  // borrow the live ModelConfig tap list -- not copied
+    state.fading_enabled = first.fading_enabled;
     prepare_tdl_state(first.taps, state.tdl_polyphase, state.delay_line);
   }
 }
@@ -207,6 +213,11 @@ void configure_leading_propagation(LinkModelState& state, const ModelConfig& mod
 void stage_link(LinkModelState& state, const IqSample* in, IqSample* out, std::size_t count)
 {
   if (state.has_tdl) {
+    if (state.fading_enabled) {
+      throw std::runtime_error(
+          "tdl fading sub-config is not yet implemented on the CUDA backend "
+          "(Phase 1.4a landed the schema; Phase 1.4b implements the kernel)");
+    }
     // tdl_taps borrowed from ModelConfig; the staging path is bit-identical to
     // the CPU backend because both call apply_tdl_step from delay.h.
     apply_tdl_step(in, out, count, *state.tdl_taps, state.tdl_polyphase, state.delay_line);

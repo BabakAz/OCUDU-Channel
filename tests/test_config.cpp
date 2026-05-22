@@ -1198,6 +1198,242 @@ models:
   }
   require(rejected, "flat scalar params on a tdl step must be rejected");
 
+  // ---- Phase 1.4a: fading sub-config schema tests ----
+  // (a) Happy-path parse + round-trip: tdl with a fading block + a Rayleigh tap
+  // + a Rician (LOS) tap.
+  const char* fading_happy_path = "test_tdl_fading_happy_topology.yaml";
+  {
+    std::ofstream f(fading_happy_path);
+    f << R"yaml(
+runtime:
+  backend: cpu
+devices:
+  - id: gnb0
+    role: gnb
+    sample_rate_hz: 23040000
+    tx_endpoint: tcp://127.0.0.1:2000
+    rx_endpoint: tcp://127.0.0.1:2001
+  - id: ue0
+    role: ue
+    sample_rate_hz: 23040000
+    tx_endpoint: tcp://127.0.0.1:2101
+    rx_endpoint: tcp://127.0.0.1:2100
+links:
+  - from: gnb0
+    to: ue0
+    model: fading_chan
+  - from: ue0
+    to: gnb0
+    model: fading_chan
+models:
+  fading_chan:
+    chain:
+      - type: tdl
+        fading:
+          f_d_max_hz: 350
+          spectrum: jakes
+          grid_us: 1.0
+        taps:
+          - delay_samples: 0.0
+            gain_db: 0.0
+            is_los: true
+            los_k_db: 7.0
+            los_angle_rad: 0.5
+          - delay_samples: 5.0
+            gain_db: -3.0
+)yaml";
+  }
+  auto fading_config = ocg::load_config_file(fading_happy_path);
+  const auto* fading_model = ocg::find_model(fading_config, "fading_chan");
+  require(fading_model != nullptr, "fading model must exist");
+  require(fading_model->chain.size() == 1, "fading model has one tdl step");
+  const auto& fading_step = fading_model->chain.front();
+  require(fading_step.type == ocg::ModelStepType::Tdl, "fading step is tdl");
+  require(fading_step.fading_enabled, "fading_enabled set by parser");
+  require(fading_step.fading_f_d_max_hz == 350.0, "f_d_max_hz round-trip");
+  require(fading_step.fading_spectrum == ocg::FadingSpectrum::Jakes, "spectrum jakes round-trip");
+  require(fading_step.fading_grid_us == 1.0, "grid_us round-trip");
+  require(fading_step.taps.size() == 2, "two taps round-trip");
+  require(fading_step.taps[0].is_los, "first tap is LOS");
+  require(fading_step.taps[0].los_k_db == 7.0, "LOS K-factor round-trip");
+  require(fading_step.taps[0].los_angle_rad == 0.5, "LOS angle round-trip");
+  require(!fading_step.taps[1].is_los, "second tap is Rayleigh");
+
+  // (b) Fading on a non-tdl step is rejected by the validator.
+  const char* fading_on_awgn_path = "test_fading_on_awgn_topology.yaml";
+  {
+    std::ofstream f(fading_on_awgn_path);
+    f << R"yaml(
+runtime:
+  backend: cpu
+devices:
+  - id: gnb0
+    role: gnb
+    sample_rate_hz: 23040000
+    tx_endpoint: tcp://127.0.0.1:2000
+    rx_endpoint: tcp://127.0.0.1:2001
+  - id: ue0
+    role: ue
+    sample_rate_hz: 23040000
+    tx_endpoint: tcp://127.0.0.1:2101
+    rx_endpoint: tcp://127.0.0.1:2100
+links:
+  - from: gnb0
+    to: ue0
+    model: bogus
+  - from: ue0
+    to: gnb0
+    model: bogus
+models:
+  bogus:
+    chain:
+      - type: awgn
+        snr_db: 25
+        fading:
+          f_d_max_hz: 100
+)yaml";
+  }
+  rejected = false;
+  try {
+    (void)ocg::load_config_file(fading_on_awgn_path);
+  } catch (const std::runtime_error&) {
+    rejected = true;
+  }
+  require(rejected, "fading sub-config on a non-tdl step must be rejected");
+
+  // (c) Negative f_d_max_hz is rejected.
+  const char* fading_neg_path = "test_fading_neg_topology.yaml";
+  {
+    std::ofstream f(fading_neg_path);
+    f << R"yaml(
+runtime:
+  backend: cpu
+devices:
+  - id: gnb0
+    role: gnb
+    sample_rate_hz: 23040000
+    tx_endpoint: tcp://127.0.0.1:2000
+    rx_endpoint: tcp://127.0.0.1:2001
+  - id: ue0
+    role: ue
+    sample_rate_hz: 23040000
+    tx_endpoint: tcp://127.0.0.1:2101
+    rx_endpoint: tcp://127.0.0.1:2100
+links:
+  - from: gnb0
+    to: ue0
+    model: neg_doppler
+  - from: ue0
+    to: gnb0
+    model: neg_doppler
+models:
+  neg_doppler:
+    chain:
+      - type: tdl
+        fading:
+          f_d_max_hz: -10
+        taps:
+          - delay_samples: 0.0
+            gain_db: 0.0
+)yaml";
+  }
+  rejected = false;
+  try {
+    (void)ocg::load_config_file(fading_neg_path);
+  } catch (const std::runtime_error&) {
+    rejected = true;
+  }
+  require(rejected, "negative f_d_max_hz must be rejected");
+
+  // (d) Unknown spectrum name rejected at parse time.
+  const char* fading_bad_spec_path = "test_fading_bad_spectrum_topology.yaml";
+  {
+    std::ofstream f(fading_bad_spec_path);
+    f << R"yaml(
+runtime:
+  backend: cpu
+devices:
+  - id: gnb0
+    role: gnb
+    sample_rate_hz: 23040000
+    tx_endpoint: tcp://127.0.0.1:2000
+    rx_endpoint: tcp://127.0.0.1:2001
+  - id: ue0
+    role: ue
+    sample_rate_hz: 23040000
+    tx_endpoint: tcp://127.0.0.1:2101
+    rx_endpoint: tcp://127.0.0.1:2100
+links:
+  - from: gnb0
+    to: ue0
+    model: bad_spec
+  - from: ue0
+    to: gnb0
+    model: bad_spec
+models:
+  bad_spec:
+    chain:
+      - type: tdl
+        fading:
+          f_d_max_hz: 100
+          spectrum: lorentzian
+        taps:
+          - delay_samples: 0.0
+            gain_db: 0.0
+)yaml";
+  }
+  rejected = false;
+  try {
+    (void)ocg::load_config_file(fading_bad_spec_path);
+  } catch (const std::runtime_error&) {
+    rejected = true;
+  }
+  require(rejected, "unknown fading spectrum must be rejected");
+
+  // (e) is_los on a non-fading tdl step is rejected (LOS only meaningful with fading).
+  const char* los_no_fading_path = "test_los_no_fading_topology.yaml";
+  {
+    std::ofstream f(los_no_fading_path);
+    f << R"yaml(
+runtime:
+  backend: cpu
+devices:
+  - id: gnb0
+    role: gnb
+    sample_rate_hz: 23040000
+    tx_endpoint: tcp://127.0.0.1:2000
+    rx_endpoint: tcp://127.0.0.1:2001
+  - id: ue0
+    role: ue
+    sample_rate_hz: 23040000
+    tx_endpoint: tcp://127.0.0.1:2101
+    rx_endpoint: tcp://127.0.0.1:2100
+links:
+  - from: gnb0
+    to: ue0
+    model: los_no_fading
+  - from: ue0
+    to: gnb0
+    model: los_no_fading
+models:
+  los_no_fading:
+    chain:
+      - type: tdl
+        taps:
+          - delay_samples: 0.0
+            gain_db: 0.0
+            is_los: true
+            los_k_db: 5.0
+)yaml";
+  }
+  rejected = false;
+  try {
+    (void)ocg::load_config_file(los_no_fading_path);
+  } catch (const std::runtime_error&) {
+    rejected = true;
+  }
+  require(rejected, "is_los on a tdl step without fading enabled must be rejected");
+
   std::remove(path);
   std::remove(bad_path);
   std::remove(bad_number_path);
@@ -1221,5 +1457,10 @@ models:
   std::remove(tdl_too_many_taps_path);
   std::remove(tdl_huge_delay_path);
   std::remove(tdl_merge_path);
+  std::remove(fading_happy_path);
+  std::remove(fading_on_awgn_path);
+  std::remove(fading_neg_path);
+  std::remove(fading_bad_spec_path);
+  std::remove(los_no_fading_path);
   return 0;
 }
