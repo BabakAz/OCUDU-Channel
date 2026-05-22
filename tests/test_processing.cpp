@@ -102,7 +102,10 @@ int main()
   config.links = {{.from = "gnb0", .to = "ue0", .model = "gain2"}, {.from = "ue0", .to = "gnb0", .model = "gain2"}};
   ocg::ModelConfig model;
   model.id = "gain2";
-  model.chain.push_back({.type = ocg::ModelStepType::Gain, .params = {{"gain_db", 6.020599913}}});
+  model.chain.push_back({.type = ocg::ModelStepType::Tdl,
+                         .params = {},
+                         .taps = {{.delay_samples = 0.0, .gain_db = 6.020599913, .phase_rad = 0.0}},
+                         .taps_declared = true});
   config.models.emplace(model.id, model);
 
   std::unordered_map<std::string, ocg::IqBuffer> latest;
@@ -120,7 +123,10 @@ int main()
 
   ocg::ModelConfig delay;
   delay.id = "delay";
-  delay.chain.push_back({.type = ocg::ModelStepType::IntegerDelay, .params = {{"delay_samples", 2.0}}});
+  delay.chain.push_back({.type = ocg::ModelStepType::Tdl,
+                         .params = {},
+                         .taps = {{.delay_samples = 2.0, .gain_db = 0.0, .phase_rad = 0.0}},
+                         .taps_declared = true});
   auto delayed = shape_link_buf(processor, "ue0", "link-delay", delay, latest["gnb0"], 1000);
   require(near(delayed[0].i, 0.0F), "delay inserts zero sample 0");
   require(near(delayed[1].i, 0.0F), "delay inserts zero sample 1");
@@ -144,7 +150,10 @@ int main()
 
     ocg::ModelConfig cuda_model;
     cuda_model.id = "cuda_mvp";
-    cuda_model.chain.push_back({.type = ocg::ModelStepType::Gain, .params = {{"gain_db", 3.0}}});
+    cuda_model.chain.push_back({.type = ocg::ModelStepType::Tdl,
+                                .params = {},
+                                .taps = {{.delay_samples = 0.0, .gain_db = 3.0, .phase_rad = 0.0}},
+                                .taps_declared = true});
     cuda_model.chain.push_back({.type = ocg::ModelStepType::PathLoss, .params = {{"path_loss_db", 1.5}}});
     cuda_model.chain.push_back({.type = ocg::ModelStepType::Phase, .params = {{"phase_rad", 0.125}}});
     cuda_model.chain.push_back({.type = ocg::ModelStepType::Cfo, .params = {{"cfo_hz", 250.0}}});
@@ -234,7 +243,10 @@ int main()
                        {.from = "gnb1", .to = "ue0", .model = "edge_b"}};
     ocg::ModelConfig edge_a;
     edge_a.id = "edge_a";
-    edge_a.chain.push_back({.type = ocg::ModelStepType::Gain, .params = {{"gain_db", -3.0}}});
+    edge_a.chain.push_back({.type = ocg::ModelStepType::Tdl,
+                            .params = {},
+                            .taps = {{.delay_samples = 0.0, .gain_db = -3.0, .phase_rad = 0.0}},
+                            .taps_declared = true});
     edge_a.chain.push_back({.type = ocg::ModelStepType::Phase, .params = {{"phase_rad", 0.2}}});
     ocg::ModelConfig edge_b;
     edge_b.id = "edge_b";
@@ -281,10 +293,13 @@ int main()
     delay_config.links = {{.from = "gnb0", .to = "ue0", .model = "delay_chain"}};
     ocg::ModelConfig delay_chain;
     delay_chain.id = "delay_chain";
-    // Leading fractional delay, then a per-sample step -- exercises the no-op
-    // device delay step followed by a real step.
-    delay_chain.chain.push_back({.type = ocg::ModelStepType::FractionalDelay, .params = {{"delay_samples", 2.75}}});
-    delay_chain.chain.push_back({.type = ocg::ModelStepType::Gain, .params = {{"gain_db", -3.0}}});
+    // Leading tdl (fractional delay + gain folded into a single tap), then a
+    // per-sample step -- exercises the no-op device tdl step followed by a
+    // real per-sample step.
+    delay_chain.chain.push_back({.type = ocg::ModelStepType::Tdl,
+                                 .params = {},
+                                 .taps = {{.delay_samples = 2.75, .gain_db = -3.0, .phase_rad = 0.0}},
+                                 .taps_declared = true});
     delay_config.models.emplace(delay_chain.id, delay_chain);
 
     ocg::CpuChannelProcessor delay_reference;
@@ -317,7 +332,10 @@ int main()
                         {.from = "gnb1", .to = "ue0", .model = "edge_a"}};
     ocg::ModelConfig delayed_edge;
     delayed_edge.id = "delayed_edge";
-    delayed_edge.chain.push_back({.type = ocg::ModelStepType::IntegerDelay, .params = {{"delay_samples", 3.0}}});
+    delayed_edge.chain.push_back({.type = ocg::ModelStepType::Tdl,
+                                  .params = {},
+                                  .taps = {{.delay_samples = 3.0, .gain_db = 0.0, .phase_rad = 0.0}},
+                                  .taps_declared = true});
     delayed_edge.chain.push_back({.type = ocg::ModelStepType::PathLoss, .params = {{"path_loss_db", 6.0}}});
     spd_config.models.emplace("delayed_edge", delayed_edge);
     spd_config.models.emplace("edge_a", edge_a);
@@ -359,11 +377,16 @@ int main()
                      {.from = "ue0", .to = "gnb0", .model = "plain"}};
     ocg::ModelConfig with_delay;
     with_delay.id = "with_delay";
-    with_delay.chain.push_back({.type = ocg::ModelStepType::IntegerDelay, .params = {{"delay_samples", 3.0}}});
-    with_delay.chain.push_back({.type = ocg::ModelStepType::Gain, .params = {{"gain_db", -3.0}}});
+    with_delay.chain.push_back({.type = ocg::ModelStepType::Tdl,
+                                 .params = {},
+                                 .taps = {{.delay_samples = 3.0, .gain_db = -3.0, .phase_rad = 0.0}},
+                                 .taps_declared = true});
     ocg::ModelConfig plain;
     plain.id = "plain";
-    plain.chain.push_back({.type = ocg::ModelStepType::Gain, .params = {{"gain_db", -3.0}}});
+    plain.chain.push_back({.type = ocg::ModelStepType::Tdl,
+                           .params = {},
+                           .taps = {{.delay_samples = 0.0, .gain_db = -3.0, .phase_rad = 0.0}},
+                           .taps_declared = true});
     ref_cfg.models.emplace(with_delay.id, with_delay);
     ref_cfg.models.emplace(plain.id, plain);
 
@@ -449,7 +472,10 @@ int main()
                      {.from = "ue0", .to = "gnb0", .model = "plain"}};
     ocg::ModelConfig with_delay;
     with_delay.id = "with_delay";
-    with_delay.chain.push_back({.type = ocg::ModelStepType::IntegerDelay, .params = {{"delay_samples", 4.0}}});
+    with_delay.chain.push_back({.type = ocg::ModelStepType::Tdl,
+                                 .params = {},
+                                 .taps = {{.delay_samples = 4.0, .gain_db = 0.0, .phase_rad = 0.0}},
+                                 .taps_declared = true});
     with_delay.chain.push_back({.type = ocg::ModelStepType::PathLoss, .params = {{"path_loss_db", 6.0}}});
     ocg::ModelConfig plain;
     plain.id = "plain";
@@ -491,7 +517,9 @@ int main()
     ref6_cfg.models.erase(with_delay.id);
     ocg::ModelConfig with_delay_6 = with_delay;
     with_delay_6.id = "with_delay_6";
-    with_delay_6.chain.front().params["delay_samples"] = 6.0;
+    // with_delay is now a single-step tdl; bump its first (only) tap's delay
+    // from 3 to 6 to match the composed offset under test.
+    with_delay_6.chain.front().taps.front().delay_samples = 6.0;
     ref6_cfg.models.emplace(with_delay_6.id, with_delay_6);
     ref6_cfg.links[0].model = with_delay_6.id;
     ocg::CpuChannelProcessor ref6_proc;
@@ -575,45 +603,12 @@ int main()
     require_near_buffer(input, output, "tdl(tau=0,gain=0,phase=0) must be identity");
   }
 
-  // (b) Single-tap tdl(tau=4, gain_db=-3) must match the legacy
-  // [integer_delay 4, gain -3] chain at the float-tolerance level over two
-  // slots (verifies cross-slot delay-line behaviour and the impulse-at-i=3
-  // coefficient layout).
-  {
-    ocg::ModelConfig legacy_model;
-    legacy_model.id = "legacy_delay_gain";
-    legacy_model.chain.push_back({.type = ocg::ModelStepType::IntegerDelay, .params = {{"delay_samples", 4.0}}});
-    legacy_model.chain.push_back({.type = ocg::ModelStepType::Gain, .params = {{"gain_db", -3.0}}});
-
-    ocg::ModelConfig tdl_model;
-    tdl_model.id = "tdl_delay_gain";
-    ocg::ModelStep tdl_step;
-    tdl_step.type = ocg::ModelStepType::Tdl;
-    tdl_step.taps = {ocg::TapSpec{.delay_samples = 4.0, .gain_db = -3.0, .phase_rad = 0.0}};
-    tdl_step.taps_declared = true;
-    tdl_model.chain.push_back(tdl_step);
-
-    auto legacy_proc = make_tdl_processor(legacy_model, 8);
-    auto tdl_proc = make_tdl_processor(tdl_model, 8);
-
-    const ocg::IqBuffer slot0_in = {{1.0F, 0.0F}, {0.0F, 1.0F}, {0.5F, -0.5F}, {-1.0F, 0.25F},
-                                    {0.75F, 0.75F}, {0.0F, 0.0F}, {-0.5F, -0.5F}, {1.0F, 1.0F}};
-    const ocg::IqBuffer slot1_in = {{0.25F, 0.25F}, {-0.25F, 0.5F}, {0.5F, 0.5F}, {1.0F, -1.0F},
-                                    {0.0F, 0.0F}, {-0.5F, -0.5F}, {0.5F, 0.0F}, {0.0F, 0.5F}};
-    ocg::IqBuffer legacy_out0(8), tdl_out0(8), legacy_out1(8), tdl_out1(8);
-    shape_link(*legacy_proc, "ue0", ocg::link_key({.from = "gnb0", .to = "ue0", .model = legacy_model.id}),
-               legacy_model, slot0_in, legacy_out0, 1000);
-    shape_link(*tdl_proc, "ue0", ocg::link_key({.from = "gnb0", .to = "ue0", .model = tdl_model.id}),
-               tdl_model, slot0_in, tdl_out0, 1000);
-    require_near_buffer(legacy_out0, tdl_out0,
-                        "tdl(tau=4,gain=-3) slot 0 must match legacy [integer_delay 4, gain -3]");
-    shape_link(*legacy_proc, "ue0", ocg::link_key({.from = "gnb0", .to = "ue0", .model = legacy_model.id}),
-               legacy_model, slot1_in, legacy_out1, 1000);
-    shape_link(*tdl_proc, "ue0", ocg::link_key({.from = "gnb0", .to = "ue0", .model = tdl_model.id}),
-               tdl_model, slot1_in, tdl_out1, 1000);
-    require_near_buffer(legacy_out1, tdl_out1,
-                        "tdl(tau=4,gain=-3) slot 1 (cross-slot history) must match legacy");
-  }
+  // (b) was a bit-exact-vs-legacy [integer_delay 4, gain -3] check during the
+  // Phase 1.0 -> 1.2 migration. The legacy step types are removed in Phase 1.3
+  // (commit C), so the comparison no longer has anything to compare against;
+  // the assertion served its purpose at the time and is dropped here. The
+  // remaining three behaviour tests (identity, 3-tap cross-slot impulse,
+  // sinusoid passband) cover the same tdl correctness surface on their own.
 
   // (c) 3-tap impulse response across two slots. An impulse at slot 0 sample
   // 0 should reappear at the three tap offsets with the expected gains -- the

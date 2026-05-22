@@ -48,8 +48,11 @@ links:
 models:
   clean:
     chain:
-      - type: gain
-        gain_db: 0
+      - type: tdl
+        taps:
+          - delay_samples: 0.0
+            gain_db: 0.0
+            phase_rad: 0.0
 )yaml";
   out.close();
 
@@ -78,8 +81,10 @@ links:
 models:
   typo:
     chain:
-      - type: gain
-        gain_dB: 0
+      - type: tdl
+        taps:
+          - delay_samples: 0.0
+            gain_dB: 0
 )yaml";
   bad.close();
 
@@ -89,7 +94,7 @@ models:
   } catch (const std::runtime_error&) {
     rejected = true;
   }
-  require(rejected, "unknown model parameter should be rejected");
+  require(rejected, "unknown tap parameter should be rejected (gain_dB typo)");
 
   const char* bad_number_path = "test_bad_number_topology.yaml";
   std::ofstream bad_number(bad_number_path);
@@ -106,8 +111,10 @@ devices:
 models:
   clean:
     chain:
-      - type: gain
-        gain_db: 0x
+      - type: tdl
+        taps:
+          - delay_samples: 0.0
+            gain_db: 0x
 )yaml";
   bad_number.close();
 
@@ -142,8 +149,11 @@ links:
 models:
   clean:
     chain:
-      - type: gain
-        gain_db: 0
+      - type: tdl
+        taps:
+          - delay_samples: 0.0
+            gain_db: 0.0
+            phase_rad: 0.0
 )yaml";
   mixed_rate.close();
 
@@ -159,26 +169,33 @@ models:
   ocg::ModelConfig gpu_awgn;
   gpu_awgn.id = "gpu_awgn";
   gpu_awgn.chain.push_back({.type = ocg::ModelStepType::Awgn, .params = {{"snr_db", 30.0}}});
-  // A chain-leading sample delay is GPU-supported (applied host-side at staging).
-  ocg::ModelConfig gpu_lead_delay;
-  gpu_lead_delay.id = "gpu_lead_delay";
-  gpu_lead_delay.chain.push_back({.type = ocg::ModelStepType::IntegerDelay, .params = {{"delay_samples", 4.0}}});
-  gpu_lead_delay.chain.push_back({.type = ocg::ModelStepType::Gain, .params = {{"gain_db", -3.0}}});
-  // A delay that does not lead the chain is not GPU-supported.
-  ocg::ModelConfig gpu_mid_delay;
-  gpu_mid_delay.id = "gpu_mid_delay";
-  gpu_mid_delay.chain.push_back({.type = ocg::ModelStepType::Gain, .params = {{"gain_db", -3.0}}});
-  gpu_mid_delay.chain.push_back({.type = ocg::ModelStepType::FractionalDelay, .params = {{"delay_samples", 4.5}}});
+  // A chain-leading tdl step (gain + delay combined into a single tap) is
+  // GPU-supported (applied host-side at staging by stage_link).
+  ocg::ModelConfig gpu_lead_tdl;
+  gpu_lead_tdl.id = "gpu_lead_tdl";
+  gpu_lead_tdl.chain.push_back({.type = ocg::ModelStepType::Tdl,
+                                .params = {},
+                                .taps = {{.delay_samples = 4.0, .gain_db = -3.0, .phase_rad = 0.0}},
+                                .taps_declared = true});
+  // A tdl mid-chain (after a per-sample step) is not GPU-supported -- the
+  // CUDA backend can only run a leading-propagation step at chain[0].
+  ocg::ModelConfig gpu_mid_tdl;
+  gpu_mid_tdl.id = "gpu_mid_tdl";
+  gpu_mid_tdl.chain.push_back({.type = ocg::ModelStepType::Awgn, .params = {{"snr_db", 30.0}}});
+  gpu_mid_tdl.chain.push_back({.type = ocg::ModelStepType::Tdl,
+                               .params = {},
+                               .taps = {{.delay_samples = 4.5, .gain_db = 0.0, .phase_rad = 0.0}},
+                               .taps_declared = true});
   config.models.clear();
   config.models.emplace(gpu_awgn.id, gpu_awgn);
-  config.models.emplace(gpu_lead_delay.id, gpu_lead_delay);
-  config.models.emplace(gpu_mid_delay.id, gpu_mid_delay);
+  config.models.emplace(gpu_lead_tdl.id, gpu_lead_tdl);
+  config.models.emplace(gpu_mid_tdl.id, gpu_mid_tdl);
   config.links = {{.from = "gnb0", .to = "ue0", .model = gpu_awgn.id}};
   require(ocg::validate_cuda_support(config).empty(), "CUDA should accept the AWGN model step");
-  config.links = {{.from = "gnb0", .to = "ue0", .model = gpu_lead_delay.id}};
-  require(ocg::validate_cuda_support(config).empty(), "CUDA should accept a chain-leading sample delay");
-  config.links = {{.from = "gnb0", .to = "ue0", .model = gpu_mid_delay.id}};
-  require(!ocg::validate_cuda_support(config).empty(), "CUDA should reject a non-leading sample delay");
+  config.links = {{.from = "gnb0", .to = "ue0", .model = gpu_lead_tdl.id}};
+  require(ocg::validate_cuda_support(config).empty(), "CUDA should accept a chain-leading tdl");
+  config.links = {{.from = "gnb0", .to = "ue0", .model = gpu_mid_tdl.id}};
+  require(!ocg::validate_cuda_support(config).empty(), "CUDA should reject a non-leading tdl");
 
   // tx_timing_offset_samples on a source folds into every outgoing link's
   // chain-leading delay.
@@ -221,43 +238,52 @@ links:
 models:
   serving:
     chain:
-      - type: gain
-        gain_db: 0
+      - type: tdl
+        taps:
+          - delay_samples: 0.0
+            gain_db: 0.0
+            phase_rad: 0.0
   with_delay:
     chain:
-      - type: integer_delay
-        delay_samples: 5
-      - type: gain
-        gain_db: -3
+      - type: tdl
+        taps:
+          - delay_samples: 5.0
+            gain_db: -3.0
+            phase_rad: 0.0
 )yaml";
   }
   auto tx_offset_config = ocg::load_config_file(tx_offset_path);
 
-  // Link gnb0 -> ue0 had no chain-leading delay; offset 3 was prepended as a
-  // single-tap tdl with delay 3 (was integer_delay 3 before the Phase 1.3
-  // retargeting of fold_link_leading_delays).
+  // Link gnb0 -> ue0 used the `serving` model which after Commit B is a
+  // single-tap tdl with delay 0 / gain 0. The tx_timing_offset 3 merges into
+  // that tdl's only tap (shift by 3), so the synthesized chain is still a
+  // single tdl step with the tap's delay now at 3.
   const auto* gnb0_ue0 = ocg::find_model(tx_offset_config, tx_offset_config.links[0].model);
   require(gnb0_ue0 != nullptr, "gnb0>ue0 effective model must exist");
-  require(gnb0_ue0->chain.size() == 2, "gnb0>ue0 should have a prepended leading tdl");
+  require(gnb0_ue0->chain.size() == 1, "gnb0>ue0 chain is the single merged tdl");
   require(gnb0_ue0->chain.front().type == ocg::ModelStepType::Tdl,
-          "gnb0>ue0 prepended step must be a tdl");
+          "gnb0>ue0 leading step must remain a tdl after the offset merge");
   require(gnb0_ue0->chain.front().taps.size() == 1,
-          "gnb0>ue0 prepended tdl must be single-tap");
+          "gnb0>ue0 tdl is single-tap (matches the source `serving` chain)");
   require(gnb0_ue0->chain.front().taps.front().delay_samples == 3.0,
-          "gnb0>ue0 prepended tdl tap delay must equal the source offset");
+          "gnb0>ue0 tdl tap delay must be original 0 + offset 3");
   require(gnb0_ue0->chain.front().taps.front().gain_db == 0.0,
-          "gnb0>ue0 prepended tdl tap must have unit gain (0 dB)");
+          "gnb0>ue0 tdl tap gain (0 dB) must be preserved by the merge");
 
-  // Link gnb0 -> ue1 already had integer_delay 5; offset 3 still merges into
-  // the legacy integer_delay until Commit C drops that enum entirely. The
-  // synthesized chain is still 2 steps with integer_delay 8 at the front.
+  // Link gnb0 -> ue1 already had a leading tdl with tap delay 5; the tx
+  // offset 3 merges into the tdl-merge branch, shifting the tap delay by 3
+  // to a final 8. The chain stays a single-step tdl model.
   const auto* gnb0_ue1 = ocg::find_model(tx_offset_config, tx_offset_config.links[1].model);
   require(gnb0_ue1 != nullptr, "gnb0>ue1 effective model must exist");
-  require(gnb0_ue1->chain.size() == 2, "gnb0>ue1 chain length unchanged when offset merges");
-  require(gnb0_ue1->chain.front().type == ocg::ModelStepType::IntegerDelay,
-          "gnb0>ue1 leading step stays integer_delay until Commit C removes the legacy enum");
-  require(gnb0_ue1->chain.front().params.at("delay_samples") == 8.0,
-          "gnb0>ue1 leading delay must be sum of existing + offset");
+  require(gnb0_ue1->chain.size() == 1, "gnb0>ue1 chain is the single merged tdl");
+  require(gnb0_ue1->chain.front().type == ocg::ModelStepType::Tdl,
+          "gnb0>ue1 leading step is a single-tap tdl after the merge");
+  require(gnb0_ue1->chain.front().taps.size() == 1,
+          "gnb0>ue1 tdl tap count unchanged by the merge");
+  require(gnb0_ue1->chain.front().taps.front().delay_samples == 8.0,
+          "gnb0>ue1 tdl tap delay must be original 5 + offset 3");
+  require(gnb0_ue1->chain.front().taps.front().gain_db == -3.0,
+          "gnb0>ue1 tdl tap gain must be preserved at -3 dB after the merge");
 
   // Reverse links (ue0->gnb0 and ue1->gnb0) have offset-0 sources; their
   // models must be the original "serving" (no synthesis).
@@ -295,8 +321,11 @@ links:
 models:
   clean:
     chain:
-      - type: gain
-        gain_db: 0
+      - type: tdl
+        taps:
+          - delay_samples: 0.0
+            gain_db: 0.0
+            phase_rad: 0.0
 )yaml";
   }
   auto tx_frac_config = ocg::load_config_file(tx_frac_path);
@@ -355,8 +384,11 @@ links:
 models:
   clean:
     chain:
-      - type: gain
-        gain_db: 0
+      - type: tdl
+        taps:
+          - delay_samples: 0.0
+            gain_db: 0.0
+            phase_rad: 0.0
 )yaml";
   }
   auto prop_config = ocg::load_config_file(prop_path);
@@ -411,8 +443,11 @@ links:
 models:
   clean:
     chain:
-      - type: gain
-        gain_db: 0
+      - type: tdl
+        taps:
+          - delay_samples: 0.0
+            gain_db: 0.0
+            phase_rad: 0.0
 )yaml";
   }
   auto link_only = ocg::load_config_file(link_only_path);
@@ -519,8 +554,11 @@ links:
 models:
   clean:
     chain:
-      - type: gain
-        gain_db: 0
+      - type: tdl
+        taps:
+          - delay_samples: 0.0
+            gain_db: 0.0
+            phase_rad: 0.0
 )yaml";
   }
   rejected = false;
@@ -560,8 +598,11 @@ links:
 models:
   clean:
     chain:
-      - type: gain
-        gain_db: 0
+      - type: tdl
+        taps:
+          - delay_samples: 0.0
+            gain_db: 0.0
+            phase_rad: 0.0
 )yaml";
   }
   rejected = false;
@@ -783,8 +824,8 @@ links:
 models:
   misplaced_taps:
     chain:
-      - type: gain
-        gain_db: 0
+      - type: awgn
+        snr_db: 25
         taps:
           - delay_samples: 0
             gain_db: 0
@@ -796,7 +837,7 @@ models:
   } catch (const std::runtime_error&) {
     rejected = true;
   }
-  require(rejected, "non-tdl step with a taps list must be rejected");
+  require(rejected, "non-tdl step (here awgn) with a taps list must be rejected");
 
   // Single-tap tdl is valid: the smallest meaningful tdl config still passes.
   const char* tdl_single_path = "test_tdl_single_topology.yaml";
@@ -969,11 +1010,11 @@ links:
 models:
   phantom_taps:
     chain:
-      - type: gain
-        gain_db: 0
-        taps:
       - type: awgn
-        snr_db: 20
+        snr_db: 25
+        taps:
+      - type: phase
+        phase_rad: 0.0
 )yaml";
   }
   rejected = false;
@@ -982,7 +1023,7 @@ models:
   } catch (const std::runtime_error&) {
     rejected = true;
   }
-  require(rejected, "empty taps block on a non-tdl step must be rejected");
+  require(rejected, "empty taps block on a non-tdl step (here awgn) must be rejected");
 
   // tdl with more taps than the validator cap is rejected. Cap is 64;
   // generate 65 taps with distinct delays (1..65).

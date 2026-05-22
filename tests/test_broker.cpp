@@ -127,7 +127,10 @@ void scenario_loopback()
                   {.from = "ue0", .to = "gnb0", .model = "clean"}};
   ocg::ModelConfig model;
   model.id = "clean";
-  model.chain.push_back({.type = ocg::ModelStepType::Gain, .params = {{"gain_db", 0.0}}});
+  model.chain.push_back({.type = ocg::ModelStepType::Tdl,
+                         .params = {},
+                         .taps = {{.delay_samples = 0.0, .gain_db = 0.0, .phase_rad = 0.0}},
+                         .taps_declared = true});
   config.models.emplace(model.id, model);
 
   void* context = zmq_ctx_new();
@@ -287,7 +290,10 @@ void scenario_multi_ue_lockstep()
                   {.from = "ue1", .to = "gnb0", .model = "clean"}};
   ocg::ModelConfig model;
   model.id = "clean";
-  model.chain.push_back({.type = ocg::ModelStepType::Gain, .params = {{"gain_db", 0.0}}});
+  model.chain.push_back({.type = ocg::ModelStepType::Tdl,
+                         .params = {},
+                         .taps = {{.delay_samples = 0.0, .gain_db = 0.0, .phase_rad = 0.0}},
+                         .taps_declared = true});
   config.models.emplace(model.id, model);
 
   // Sub-batch chunk (not a divisor of the 23040 batch) and a tx_offset smaller
