@@ -197,8 +197,10 @@ bool is_allowed_param(ModelStepType type, const std::string& key)
       return key == "cfo_hz" || key == "phase_rad";
     case ModelStepType::Tdl:
       // tdl carries its tap data in `taps`, not in `params`. No scalar params
-      // are valid for it today; per-tap fading config will arrive as a nested
-      // map under each TapSpec, not as flat scalars at the step level.
+      // are valid for it today; the future `fading` sub-config will arrive as
+      // a per-step block (one max-Doppler frequency per link) with per-tap
+      // sub-ray angle / LOS / Rician-K seeds derived from it -- see HTML
+      // section 19. It is not a flat parameter at the step level.
       return false;
   }
   return false;

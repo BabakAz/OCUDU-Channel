@@ -1727,11 +1727,23 @@ models:     desired:     [ gain -3 dB · phase 0.1 rad · cfo 150 Hz ]
   gap.</p>
 
   <p>The step is <b><code>tdl</code></b> — a tapped delay line with per-tap
-  complex gain and per-tap fractional delay. An optional per-tap
+  complex gain and per-tap fractional delay. An optional
   <b><code>fading</code></b> sub-config makes each tap's gain time-varying
-  with a Doppler-shaped autocorrelation. <code>tdl</code> alone is static
-  multipath; <code>tdl</code> with per-tap fading is the standard 3GPP
-  CDL/TDL channel used in every modem test in TS 38.101.</p>
+  with a Doppler-shaped autocorrelation driven by a per-step max-Doppler
+  frequency. <code>tdl</code> alone is static multipath; <code>tdl</code>
+  with fading enabled implements the 3GPP <b>TR 38.901 §7.7.2 TDL</b>
+  channel model (the simplified SISO variant used by all of TDL-A through
+  TDL-E).</p>
+
+  <p class="key"><b>Scope of this step is TDL, not full CDL.</b> The
+  Clustered Delay Line (CDL) models in TR 38.901 §7.7.1 add per-cluster
+  azimuth/elevation angles, polarisation, sub-ray geometry, and antenna
+  array response on top of the basic tap structure. Those layers need
+  antenna and beamforming machinery that the broker does not have today;
+  CDL therefore stays out of scope for Phase 1 and is queued for a later
+  milestone. The 23-tap profile counts and the example references below
+  are TDL-A / TDL-B / TDL-C tables (TR 38.901 §7.7.2), not their CDL
+  siblings.</p>
 
   <h4>Static taps — what <code>tdl</code> does</h4>
 
@@ -1749,29 +1761,37 @@ models:     desired:     [ gain -3 dB · phase 0.1 rad · cfo 150 Hz ]
   delay-spread fidelity at 23.04 MS/s).</p>
 
   <p><b>What it buys.</b> Static frequency-selective channels — 3GPP
-  TDL/CDL profiles, 2-ray ground-reflection, indoor multipath. Memory cost
-  is roughly the same as a single-tap edge today and <b>~24× lower</b>
-  than the naive "N parallel edges per link" approach for a 23-tap CDL-A
-  profile, because the cross-slot history is one ring per link rather
-  than one per tap.</p>
+  TDL profiles (TR 38.901 §7.7.2 tables 7.7.2-1 through 7.7.2-5),
+  2-ray ground-reflection, indoor multipath. Memory cost is roughly the
+  same as a single-tap edge today and <b>~24× lower</b> than the naive
+  "N parallel edges per link" approach for a 23-tap TDL-A profile,
+  because the cross-slot history is one ring per link rather than one
+  per tap.</p>
 
-  <h4>Per-tap fading — the Doppler sub-config</h4>
+  <h4>Time-varying tap gain — the <code>fading</code> sub-config</h4>
 
-  <p><b>The model.</b> When fading is enabled on a tap, its complex gain
+  <p><b>The model.</b> When the step's <code>fading</code> sub-config is
+  enabled, each tap's complex gain
   <span class="mono">a<sub>k</sub>(t)</span> becomes a zero-mean complex
-  <b>stationary Gaussian process</b>. The one knob that defines it is the
-  tap's <b>Doppler power spectrum</b>
+  <b>stationary Gaussian process</b>. The single knob that defines the
+  shape is the tap's <b>Doppler power spectrum</b>
   <span class="mono">S<sub>k</sub>(f)</span> — equivalently, the temporal
   autocorrelation <span class="mono">R<sub>k</sub>(Δt)</span>, since one
   is the Fourier transform of the other (the WSSUS framework, Bello 1963).
   Everything else about the tap follows from that single choice.</p>
 
-  <p><b>Default spectrum: Jakes' classical.</b> Cosine-symmetric around
-  0 Hz, parameterised by a per-tap max-Doppler frequency
-  <span class="mono">f<sub>d,k</sub> = v · f<sub>c</sub> / c</span> —
-  stationary radio mismatch ≈ 0 Hz, pedestrian at 3.5 GHz ≈ 11 Hz, car
-  ≈ 350 Hz. Other spectra (Gaussian, flat, 3GPP cluster-specific) drop
-  in as alternate generators behind the same sub-config.</p>
+  <p><b>Default spectrum: Jakes' classical (per link, not per tap).</b>
+  Cosine-symmetric around 0 Hz, parameterised by a <b>single per-link</b>
+  max-Doppler frequency
+  <span class="mono">f<sub>d,max</sub> = v · f<sub>c</sub> / c</span> set
+  by the UE velocity — stationary radio mismatch ≈ 0 Hz, pedestrian at
+  3.5 GHz ≈ 11 Hz, car ≈ 350 Hz. <b>All taps share the same
+  <span class="mono">f<sub>d,max</sub></span>; the per-tap variation
+  comes from each tap's own random sub-ray angle draws, not from
+  different velocities per tap.</b> Other spectra (Gaussian, flat) drop
+  in as alternate generators behind the same sub-config; the
+  cluster-specific spectra of full CDL are out of scope here as noted
+  above.</p>
 
   <p><b>Envelope statistics fall out — they are not a separate knob.</b>
   A zero-mean complex Gaussian process has a <b>Rayleigh</b> envelope by
@@ -1782,22 +1802,43 @@ models:     desired:     [ gain -3 dB · phase 0.1 rad · cfo 150 Hz ]
   question (is there a deterministic LOS tap alongside the faded ones?),
   not a fading parameter.</p>
 
-  <p><b>Per-tap <span class="mono">f<sub>d,k</sub></span> matters.</b>
-  A stationary LOS tap and several mobile-scatterer taps can coexist with
-  different Doppler frequencies — exactly the 3GPP TR 38.901 cluster
-  model. A single link-wide <span class="mono">f<sub>d</sub></span> would
-  smear every tap with the same Doppler, which is not what the standard
-  says.</p>
+  <p><b>Per-tap variation comes from sub-ray angles, not from different
+  velocities.</b> The per-link
+  <span class="mono">f<sub>d,max</sub></span> is the bound; each tap
+  independently draws <span class="mono">M ≈ 20</span> random sub-ray
+  angles <span class="mono">α<sub>k,m</sub></span> uniform in
+  <span class="mono">[0, 2π)</span>, and the tap's instantaneous
+  contribution at time <span class="mono">t</span> is the sum-of-sinusoids
+  <span class="mono">a<sub>k</sub>(t) ∝
+  Σ<sub>m</sub> exp(j(f<sub>d,max</sub> · cos(α<sub>k,m</sub>) · t +
+  φ<sub>k,m</sub>))</span>. The Jakes spectrum emerges from the cos(α)
+  projection of a common <span class="mono">f<sub>d,max</sub></span> over
+  many sub-rays — exactly what Sionna's TR 38.901 TDL implementation does
+  (<code>tr38901/tdl.py</code>) and what Zheng &amp; Xiao (2003) derive
+  as the WSS-correct improved Jakes generator. The LOS variant
+  (TDL-D / TDL-E) adds a deterministic specular component to the first
+  tap with Doppler shift
+  <span class="mono">f<sub>d,max</sub> · cos(α<sub>LOS</sub>)</span> —
+  also derived from the same per-link
+  <span class="mono">f<sub>d,max</sub></span>, not an independent
+  per-tap value.</p>
 
-  <p><b>Implementation.</b> Per-tap Jakes sum-of-sinusoids (~16 sinusoids
-  per tap), counter-based Philox seeds per (link, tap, sinusoid, slot)
-  for deterministic reproducibility. To bound kernel cost, the generator
-  produces <span class="mono">a<sub>k</sub>(t)</span> on a coarse grid
+  <p><b>Implementation.</b> Per-tap sum-of-sinusoids with
+  <span class="mono">M = 20</span> sinusoids per tap (the Zheng-Xiao /
+  Sionna convention; the Jakes generator's WSS error is bounded once
+  <span class="mono">M ≥ 8</span>, and 20 is the published default).
+  Counter-based Philox seeds keyed on (link, tap, sub-ray) draw the
+  <span class="mono">M</span> angles <span class="mono">α<sub>k,m</sub></span>
+  once at <code>prepare()</code> and the
+  <span class="mono">M</span> initial phases
+  <span class="mono">φ<sub>k,m</sub></span> deterministically — same
+  seed across CPU and CUDA, so cross-backend tests can assert bit-exact
+  output. To bound kernel cost, the generator produces
+  <span class="mono">a<sub>k</sub>(t)</span> on a coarse grid
   (~1 µs, ~1 kHz) and linearly interpolates up to sample rate: fading
   bandwidth is ~10<sup>4</sup>× below sample rate, so the interpolation
   error sits well below any AWGN floor. The fading evaluation and the
-  TDL convolution share a single kernel — both backends produce the same
-  bits given the same Philox counter.</p>
+  TDL convolution share a single kernel.</p>
 
   <h4>What this replaces</h4>
 
@@ -1828,8 +1869,10 @@ models:     desired:     [ gain -3 dB · phase 0.1 rad · cfo 150 Hz ]
   shift (no spread) is already supported via the existing <code>cfo</code>
   chain step — set <code>cfo_hz</code> to
   <span class="mono">f<sub>d</sub> = v · f<sub>c</sub> / c</span> for a
-  link-wide constant offset. What's missing is <i>per-tap</i> Doppler and
-  <i>stochastic</i> Doppler spread, both of which arrive together when
+  link-wide constant offset. What is missing is <i>stochastic</i> Doppler
+  spread — the per-tap Jakes-shaped spectrum that emerges from sub-ray
+  angles within each cluster, all bounded by the same per-link
+  <span class="mono">f<sub>d,max</sub></span>. That arrives when
   <code>tdl</code> with its fading sub-config lands.</p>
 
   <h3>Planned — operational flexibility</h3>

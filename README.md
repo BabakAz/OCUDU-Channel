@@ -27,7 +27,9 @@ What's proven end-to-end on an RTX 5090 against the OCUDU + srsUE stack:
 `integer_delay`, `fractional_delay` — CUDA and CPU, bit-exact.
 
 **Next:** multi-tap channels with Doppler-spread fading via a unified `tdl`
-chain step (3GPP CDL/TDL profiles). See
+chain step (3GPP TR 38.901 §7.7.2 TDL profiles — TDL-A through TDL-E). Full
+CDL with per-cluster angles, polarisation, and antenna array response is
+queued for a later milestone. See
 [technical reference §19](docs/ocudu-gpu-channel-doc.html#scope) for the
 architecture and decisions.
 
