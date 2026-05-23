@@ -301,6 +301,7 @@
     <tr><th>Term</th><th>Meaning</th></tr>
     <tr><td class="mono">node</td><td>a device in the graph (a gNB or a UE); the broker serves one RX signal per node, per slot</td></tr>
     <tr><td class="mono">link / edge</td><td>a directed channel from one node to another, configured under <code>links:</code> in the YAML topology with a named <code>model</code></td></tr>
+    <tr><td class="mono">incoming edges</td><td>for destination node <span class="mono">d</span>, the subset of links where <span class="mono">link.to == d</span>. Resolved once per server thread at broker startup (<code>src/broker.cpp</code>); this list is the index space for cursors (§6), staged slots (§7), per-edge <code>stage_link()</code> calls (§11), and the kernel's per-thread edge loop (§13)</td></tr>
     <tr><td class="mono">model</td><td>a chain of channel steps (tdl, path_loss, phase, CFO, AWGN) applied per-edge under <code>models:</code> in the YAML</td></tr>
     <tr><td class="mono">rx_model</td><td>an optional second model applied <b>once to the summed RX</b> of a node — typically a thermal-noise floor</td></tr>
     <tr><td class="mono">gNB / UE</td><td>5G base station (gNodeB) / user equipment; both are just "nodes" to the emulator</td></tr>
@@ -503,6 +504,29 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   that pull TX packets from each source's PUB socket and append samples (with a monotonic
   sequence number) to a per-source ring buffer. The server thread only reads from these
   rings; it never writes to them.</p>
+
+  <p class="key"><b>Node ↔ edge mapping (the per-server-thread invariant).</b>
+  The YAML topology is two flat lists — <code>devices:</code> (nodes) and
+  <code>links:</code> (directed edges with <code>from</code> / <code>to</code>
+  / <code>model</code>). When the broker spawns the server thread for
+  destination device <span class="mono">d</span>, it resolves that node's
+  <b>incoming-edges set</b> by filtering the global links once at startup:
+  <span class="mono">incoming = { i : links[i].to == d }</span>
+  (<a href="https://github.com/zhouyou-gu/ocudu-gpu-channel/blob/main/src/broker.cpp"><code>src/broker.cpp</code></a>:420-425).
+  From that list it builds a fixed per-thread
+  <code>std::vector&lt;SuperpositionInput&gt; superposition</code>, where
+  each entry holds the edge's <code>link_key</code> (the processor's state
+  map key) and a pointer to its <code>model</code>. That vector is then the
+  index space for <b>everything the server does per slot</b> — one cursor
+  per <span class="mono">incoming[k]</span> in alignment co-init (§6), one
+  ring read per <span class="mono">incoming[k]</span> in the common-window
+  read, one <code>stage_link()</code> call per <span class="mono">incoming[k]</span>
+  to apply that link's <span class="mono">h<sub>(src→dst)</sub>(t, τ)</span>
+  into staged slot <span class="mono">k</span> (§11), and the kernel's
+  per-thread inner loop walks <span class="mono">k = 0 … incoming.size()−1</span>
+  to sum across edges (§13). The mapping is computed once at broker startup
+  and is fixed for the run; the per-slot loop never re-resolves it.</p>
+
   <p>The per-serve sequence in <code>src/broker.cpp</code> is a strict pipeline —
   <b>align → read → delay → stage → kernel → return → throttle → advance</b>. Each
   later stage assumes the guarantee the previous one made. The shape, laid out by
