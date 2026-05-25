@@ -24,6 +24,13 @@ struct ProcessorTimings {
   double kernel_us = 0.0;
   double d2h_us = 0.0;
   double gpu_process_us = 0.0;
+  // True when the most recent CUDA process_superposition call dispatched
+  // through the device-channel kernel (Phase 2 D2b path). False when it fell
+  // back to host-side stage_link (CUDA path before Phase 2, or when a node
+  // has any non-tdl-leading incoming edge). Tests assert this so a
+  // regression in the dispatch gate can't silently revert to host staging
+  // -- parity would still hold but the 183x perf win would be lost.
+  bool used_device_channel = false;
 };
 
 // One incoming edge of a superposition: the link's channel model and the

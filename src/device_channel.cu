@@ -103,9 +103,12 @@ __global__ void apply_channel_kernel(
     __syncthreads();
 
     const float inv_sqrt_M = rsqrtf((float)kDeviceMaxFadingSubrays);
-    const float slot_start_t =
-        (float)((double)s->slot_start_samples / (double)sample_rate_hz);
+    // slot_start_t stays in double for the angle0 product; the float version
+    // is only used for step_angle (small, no drift across grid points).
+    const double slot_start_t_d =
+        (double)s->slot_start_samples / (double)sample_rate_hz;
     const float grid_dt = (float)grid_stride / sample_rate_hz;
+    constexpr double kTwoPiD = 6.28318530717958647692;
 
     // One thread per tap accumulates that tap's M sub-rays across the grid
     // via phase accumulation (so each grid point costs one complex multiply
@@ -115,8 +118,15 @@ __global__ void apply_channel_kernel(
       for (int m = 0; m < kDeviceMaxFadingSubrays; ++m) {
         const float alpha_km = s->tap_alpha[kt][m];
         const float phi_km = s->tap_phi[kt][m];
-        const float omega_m = kTwoPiF * s->f_d_max_hz * cosf(alpha_km);
-        const float angle0 = omega_m * slot_start_t + phi_km;
+        // omega_m in double mirrors the host computation in delay.h. Without
+        // this the long-run angle0 = omega_m * slot_start_t would lose float
+        // precision after minutes of runtime and diverge from the host path.
+        const double omega_m_d =
+            kTwoPiD * (double)s->f_d_max_hz * cos((double)alpha_km);
+        const double angle0_d = omega_m_d * slot_start_t_d + (double)phi_km;
+        // Reduce mod 2*pi in double before casting -- matches host fmod path.
+        const float angle0 = (float)fmod(angle0_d, kTwoPiD);
+        const float omega_m = (float)omega_m_d;
         const float step_angle = omega_m * grid_dt;
         float c_cur, s_cur;
         __sincosf(angle0, &s_cur, &c_cur);
@@ -137,11 +147,17 @@ __global__ void apply_channel_kernel(
         g_grid_i[kt][gp] *= inv_sqrt_M;
         g_grid_q[kt][gp] *= inv_sqrt_M;
       }
-      // LOS phase constants for this tap.
+      // LOS phase constants for this tap. omega_los recomputed in double so
+      // the angle0 product against slot_start_t doesn't drift in float, then
+      // reduced mod 2*pi -- same treatment as the subray loop above.
       if (s->tap_is_los[kt]) {
-        los_phase_start[kt] = s->tap_omega_los[kt] * slot_start_t +
-                              s->tap_phi_los[kt];
-        los_step_angle[kt] = s->tap_omega_los[kt] / sample_rate_hz;
+        const double omega_los_d =
+            kTwoPiD * (double)s->f_d_max_hz *
+            cos((double)s->tap_los_angle_rad[kt]);
+        const double angle0_d =
+            omega_los_d * slot_start_t_d + (double)s->tap_phi_los[kt];
+        los_phase_start[kt] = (float)fmod(angle0_d, kTwoPiD);
+        los_step_angle[kt] = (float)(omega_los_d / (double)sample_rate_hz);
       }
     }
     __syncthreads();
@@ -344,13 +360,13 @@ bool build_device_link_state(
       const double K_lin = std::pow(10.0, step.taps[k].los_k_db / 10.0);
       out.tap_los_factor[k] = static_cast<float>(std::sqrt(K_lin / (K_lin + 1.0)));
       out.tap_rayleigh_factor[k] = static_cast<float>(std::sqrt(1.0 / (K_lin + 1.0)));
-      out.tap_omega_los[k] = static_cast<float>(
-          2.0 * kPiDev * step.fading_f_d_max_hz *
-          std::cos(step.taps[k].los_angle_rad));
+      // Store the angle, not the precomputed omega -- the kernel recomputes
+      // omega_los in double for parity-preserving long-run phase precision.
+      out.tap_los_angle_rad[k] = static_cast<float>(step.taps[k].los_angle_rad);
     } else {
       out.tap_los_factor[k] = 0.0F;
       out.tap_rayleigh_factor[k] = 1.0F;
-      out.tap_omega_los[k] = 0.0F;
+      out.tap_los_angle_rad[k] = 0.0F;
     }
 
     if (step.fading_enabled && k < static_cast<int>(host_fading.tap_alpha.size())) {

@@ -79,7 +79,11 @@ struct DeviceLinkState {
   int   tap_is_los[kDeviceMaxTaps];                                // 0/1 per tap
   float tap_los_factor[kDeviceMaxTaps];                            // sqrt(K/(K+1))
   float tap_rayleigh_factor[kDeviceMaxTaps];                       // sqrt(1/(K+1))
-  float tap_omega_los[kDeviceMaxTaps];                             // 2*pi*f_d_max*cos(los_angle_rad)
+  // Kernel recomputes omega_los_d = 2*pi*f_d_max*cos(angle) in DOUBLE so the
+  // long-run drift from float-precision omega matches the host path exactly.
+  // Storing the angle (small magnitude) instead of a precomputed omega keeps
+  // bit-equivalent precision on both backends.
+  float tap_los_angle_rad[kDeviceMaxTaps];                         // LOS arrival angle
   float tap_phi_los[kDeviceMaxTaps];                               // LOS initial phase
 
   float tap_alpha[kDeviceMaxTaps][kDeviceMaxFadingSubrays];        // sub-ray angles (uniform [0, 2pi))

@@ -694,6 +694,7 @@ private:
     last_timings_.d2h_us = static_cast<double>(d2h_ms) * 1000.0;
     last_timings_.gpu_process_us =
         static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(total_elapsed).count()) / 1000.0;
+    last_timings_.used_device_channel = sp.use_device_channel;
   }
 
   // Builds a model chain into `ms`, advancing its per-step CFO phase and AWGN

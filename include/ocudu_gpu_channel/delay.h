@@ -318,9 +318,16 @@ inline void apply_tdl_step_fading(const IqSample* in,
     for (int m = 0; m < kTdlFadingSinusoids; ++m) {
       const double omega_m =
           two_pi * fading.f_d_max_hz * std::cos(fading.tap_alpha[k][m]);
-      const double angle0 = omega_m * slot_start_t + fading.tap_phi[k][m];
-      complex_f current{static_cast<float>(std::cos(angle0)),
-                        static_cast<float>(std::sin(angle0))};
+      // angle0 grows linearly with slot_start_t. Reduce mod 2*pi in double
+      // before casting to float so the bit-equivalent device path (which uses
+      // __sincosf, whose internal range-reduction loses precision for large
+      // angles) sees the same pre-reduced phase. Without this both backends
+      // would drift after minutes of runtime in opposite ways and the
+      // CPU<->CUDA parity invariant would silently fail.
+      const double angle0_d =
+          omega_m * slot_start_t + fading.tap_phi[k][m];
+      const float angle0 = static_cast<float>(std::fmod(angle0_d, two_pi));
+      complex_f current{std::cos(angle0), std::sin(angle0)};
       const double step_angle = omega_m * grid_dt;
       const complex_f step_mul{static_cast<float>(std::cos(step_angle)),
                                static_cast<float>(std::sin(step_angle))};
@@ -349,9 +356,11 @@ inline void apply_tdl_step_fading(const IqSample* in,
     rayleigh_factor[k] = static_cast<float>(std::sqrt(1.0 / (K_lin + 1.0)));
     const double omega_los =
         two_pi * fading.f_d_max_hz * std::cos(taps[k].los_angle_rad);
-    const double angle0 = omega_los * slot_start_t + fading.tap_phi_los[k];
-    los_current[k] = complex_f{static_cast<float>(std::cos(angle0)),
-                               static_cast<float>(std::sin(angle0))};
+    // See angle0 reduction above (subray loop) for rationale -- LOS path has
+    // the same drift profile so applies the same fmod-mod-2pi treatment.
+    const double angle0_d = omega_los * slot_start_t + fading.tap_phi_los[k];
+    const float angle0 = static_cast<float>(std::fmod(angle0_d, two_pi));
+    los_current[k] = complex_f{std::cos(angle0), std::sin(angle0)};
     const double step_angle = omega_los / sr;
     los_step[k] = complex_f{static_cast<float>(std::cos(step_angle)),
                             static_cast<float>(std::sin(step_angle))};

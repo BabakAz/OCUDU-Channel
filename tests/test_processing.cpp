@@ -36,6 +36,23 @@ void require_near_buffer(const ocg::IqBuffer& lhs, const ocg::IqBuffer& rhs, con
   }
 }
 
+// Bit-exact equivalence. For cases where two computations on the SAME backend
+// MUST produce identical floats (e.g., a determinism guard: same seed, same
+// model, same link key) -- not "near", literally byte-identical. Tightens the
+// assertion so a float-determinism regression across recompiles is caught
+// instead of being hidden by the 1e-3 numeric tolerance.
+void require_equal_buffer(const ocg::IqBuffer& lhs, const ocg::IqBuffer& rhs, const char* message)
+{
+  require(lhs.size() == rhs.size(), message);
+  for (std::size_t i = 0; i != lhs.size(); ++i) {
+    if (lhs[i].i != rhs[i].i || lhs[i].q != rhs[i].q) {
+      std::cerr << "FAIL: " << message << " at sample " << i << " lhs=(" << lhs[i].i << "," << lhs[i].q
+                << ") rhs=(" << rhs[i].i << "," << rhs[i].q << ")\n";
+      std::exit(1);
+    }
+  }
+}
+
 // Single-edge shape: call process_superposition with one input, no rx_model.
 // Replaces the old process_into convenience entry point.
 void shape_link(ocg::ChannelProcessor& proc,
@@ -890,6 +907,56 @@ int main()
       run_cpu_vs_cuda(m, {slot0, slot1},
                       "CUDA tdl fading (Jakes + LOS) must match CPU bit-exactly across slots");
     }
+
+    // (f) Dispatch gate: a leading-tdl model must dispatch through the device
+    // channel kernel (Phase 2 D2b path), and a leading-non-tdl model must fall
+    // back to host-side stage_link. Without this assertion a regression in the
+    // gate could silently revert every CUDA run to host staging -- parity
+    // would still hold (host stage_link is the reference) but the 183x perf
+    // win disappears with no test failure. This test gates that.
+    {
+      // Leading tdl: device channel kernel SHOULD engage.
+      ocg::ModelConfig m;
+      m.id = "tdl_cuda_dispatch_on";
+      ocg::ModelStep step;
+      step.type = ocg::ModelStepType::Tdl;
+      step.taps = {ocg::TapSpec{.delay_samples = 0.0, .gain_db = 0.0, .phase_rad = 0.0}};
+      step.taps_declared = true;
+      m.chain.push_back(step);
+      const auto cfg = build_cuda_tdl_config(m, 64);
+      auto cuda = ocg::create_channel_processor(cfg);
+      const std::string key = ocg::link_key({.from = "gnb0", .to = "ue0", .model = m.id});
+      ocg::IqBuffer in(64, ocg::IqSample{1.0F, 0.0F});
+      ocg::IqBuffer out(64);
+      shape_link(*cuda, "ue0", key, m, in, out, 23040000);
+      require(cuda->last_timings().used_device_channel,
+              "CUDA dispatch gate: leading-tdl model must engage the device channel kernel");
+    }
+    {
+      // Leading non-tdl (phase): device channel gate is OFF, host stage path.
+      ocg::TopologyConfig cfg;
+      cfg.runtime.backend = ocg::Backend::Cuda;
+      cfg.runtime.batch_samples_auto = false;
+      cfg.runtime.batch_samples = 64;
+      cfg.runtime.queue_samples = 512;
+      cfg.devices = {{.id = "gnb0", .role = "gnb", .sample_rate_hz = 23040000,
+                      .tx_endpoint = "tx0", .rx_endpoint = "rx0"},
+                     {.id = "ue0", .role = "ue", .sample_rate_hz = 23040000,
+                      .tx_endpoint = "tx1", .rx_endpoint = "rx1"}};
+      cfg.links = {{.from = "gnb0", .to = "ue0", .model = "leading_phase"},
+                   {.from = "ue0", .to = "gnb0", .model = "leading_phase"}};
+      ocg::ModelConfig m;
+      m.id = "leading_phase";
+      m.chain.push_back({.type = ocg::ModelStepType::Phase, .params = {{"phase_rad", 0.1}}});
+      cfg.models.emplace(m.id, m);
+      auto cuda = ocg::create_channel_processor(cfg);
+      const std::string key = ocg::link_key({.from = "gnb0", .to = "ue0", .model = m.id});
+      ocg::IqBuffer in(64, ocg::IqSample{1.0F, 0.0F});
+      ocg::IqBuffer out(64);
+      shape_link(*cuda, "ue0", key, m, in, out, 23040000);
+      require(!cuda->last_timings().used_device_channel,
+              "CUDA dispatch gate: leading-non-tdl model must fall back to host stage path");
+    }
   }
 #endif
 
@@ -981,8 +1048,12 @@ int main()
     const std::string link = ocg::link_key({.from = "gnb0", .to = "ue0", .model = m.id});
     shape_link(*proc1, "ue0", link, m, in, out1, 1000);
     shape_link(*proc2, "ue0", link, m, in, out2, 1000);
-    require_near_buffer(out1, out2,
-                        "fading determinism: same model + same link key -> identical output");
+    // Determinism is a same-backend / same-seed contract: floats must be
+    // byte-identical, not "close". Tightened from 1e-3 to bit-exact so a
+    // recompile that subtly perturbs the order of operations is caught
+    // instead of being absorbed by the numeric tolerance.
+    require_equal_buffer(out1, out2,
+                         "fading determinism: same model + same link key -> bit-identical output");
     // Run a second slot through proc1; redo proc2 with two consecutive slots
     // and assert the second slot matches too (slot_start_samples accumulator
     // must advance deterministically).
@@ -992,8 +1063,8 @@ int main()
     ocg::IqBuffer out3a(32), out3b(32);
     shape_link(*proc3, "ue0", link, m, in, out3a, 1000);
     shape_link(*proc3, "ue0", link, m, in, out3b, 1000);
-    require_near_buffer(out1b, out3b,
-                        "fading determinism: cross-slot accumulator must be reproducible");
+    require_equal_buffer(out1b, out3b,
+                         "fading determinism: cross-slot accumulator must be bit-reproducible");
   }
 
   // (c) LOS at K = +Inf (effectively): when the Rician K-factor is very
