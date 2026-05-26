@@ -14,7 +14,8 @@ namespace {
 void usage()
 {
   std::cout << "usage: ocudu-gpu-channel --config topology.yaml [--duration 60s] [--strict-realtime] "
-               "[--control-endpoint tcp://*:5559]\n";
+               "[--control-endpoint tcp://*:5559] "
+               "[--telemetry-endpoint tcp://*:5560 --telemetry-rate-hz 20]\n";
 }
 
 } // namespace
@@ -24,7 +25,9 @@ int main(int argc, char** argv)
   std::string config_path;
   std::chrono::milliseconds duration{0};
   bool strict_realtime = false;
-  std::string control_endpoint;  // empty = control plane disabled
+  std::string control_endpoint;     // empty = control plane disabled
+  std::string telemetry_endpoint;   // empty = telemetry feed disabled (v3.0)
+  double      telemetry_rate_hz = 20.0;
 
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
@@ -40,6 +43,10 @@ int main(int argc, char** argv)
       strict_realtime = true;
     } else if (arg == "--control-endpoint" && i + 1 < argc) {
       control_endpoint = argv[++i];
+    } else if (arg == "--telemetry-endpoint" && i + 1 < argc) {
+      telemetry_endpoint = argv[++i];
+    } else if (arg == "--telemetry-rate-hz" && i + 1 < argc) {
+      telemetry_rate_hz = std::atof(argv[++i]);
     } else {
       std::cerr << "unknown or incomplete argument: " << arg << "\n";
       usage();
@@ -65,10 +72,17 @@ int main(int argc, char** argv)
     if (!control_endpoint.empty()) {
       ocg::ControlServerConfig ccfg;
       ccfg.endpoint = control_endpoint;
+      ccfg.telemetry_endpoint = telemetry_endpoint;   // v3.0; empty = disabled
+      ccfg.telemetry_rate_hz  = telemetry_rate_hz;
       control_server = std::make_unique<ocg::ControlServer>(
           std::move(ccfg), broker.collect_control_links());
       control_server->start();
-      std::cout << "event=control_start endpoint=\"" << control_endpoint << "\"\n";
+      std::cout << "event=control_start endpoint=\"" << control_endpoint << "\"";
+      if (!telemetry_endpoint.empty()) {
+        std::cout << " telemetry_endpoint=\"" << telemetry_endpoint
+                  << "\" telemetry_rate_hz=" << telemetry_rate_hz;
+      }
+      std::cout << "\n";
     }
 
     auto stats = broker.run(duration);
@@ -79,7 +93,11 @@ int main(int argc, char** argv)
       const auto cs = control_server->stats();
       std::cout << " control_msgs_received=" << cs.msgs_received
                 << " control_updates_applied=" << cs.updates_applied
-                << " control_updates_rejected=" << cs.updates_rejected;
+                << " control_updates_rejected=" << cs.updates_rejected
+                << " control_batches_committed=" << cs.batches_committed
+                << " control_batches_aborted="   << cs.batches_aborted
+                << " telemetry_frames="          << cs.telemetry_frames
+                << " telemetry_drops="           << cs.telemetry_drops;
     }
     std::cout << "\n" << std::flush;
     if (strict_realtime &&

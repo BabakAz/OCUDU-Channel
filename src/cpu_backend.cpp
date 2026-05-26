@@ -214,6 +214,20 @@ void CpuChannelProcessor::apply_chain_to_link(const std::string& link_key_value,
     state.warmup_until_slot = 0;
   }
 
+  // v3.0 TM1: publish the per-link telemetry snapshot. Cheap (seqlock
+  // pre-bump + POD copy + post-bump); the telemetry thread reads at
+  // its own cadence and tolerates a torn-read retry if it lands mid-
+  // write.
+  {
+    TelemetrySnapshot ts;
+    ts.slot              = snap_idx;
+    ts.live_seqno        = state.live_seqno;
+    ts.live              = state.live;
+    ts.profile_active    = state.live_profile_active;
+    ts.warmup_until_slot = state.warmup_until_slot;
+    publish_telemetry_snapshot(state.ctl, ts);
+  }
+
   std::copy(input.begin(), input.end(), state.scratch_a.begin());
   std::span<IqSample> current(state.scratch_a.data(), input.size());
   std::span<IqSample> next(state.scratch_b.data(), input.size());

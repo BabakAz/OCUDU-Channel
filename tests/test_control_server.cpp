@@ -480,6 +480,101 @@ int main()
     // ControlServer dtor stops the loop + joins the thread.
   }
 
+  // ── v3.0: telemetry PUB feed ────────────────────────────────────────────
+  // Bring up a ControlServer with telemetry on a localhost TCP port,
+  // populate per-link telemetry snapshots directly (mirrors what the
+  // backend snap path does), subscribe with a real ZMQ_SUB socket, and
+  // assert the JSON frame contents + topic-prefix filtering.
+  {
+    auto t_a = std::make_unique<ocg::BrokerLinkControl>();
+    auto t_b = std::make_unique<ocg::BrokerLinkControl>();
+
+    // Pre-populate telemetry snapshots so the publisher has something
+    // meaningful to emit. The publisher runs at telemetry_rate_hz so
+    // we just give it a generous timeout.
+    {
+      ocg::TelemetrySnapshot s;
+      s.slot              = 100;
+      s.live_seqno        = 7;
+      s.live.path_loss_db = -8.5F;
+      s.live.cfo_hz       = 333.0F;
+      s.warmup_until_slot = 0;
+      ocg::publish_telemetry_snapshot(*t_a, s);
+    }
+    {
+      ocg::TelemetrySnapshot s;
+      s.slot              = 200;
+      s.live_seqno        = 11;
+      s.live.path_loss_db = 5.0F;
+      s.live.awgn_snr_db  = 12.5F;
+      s.profile_active    = true;
+      ocg::publish_telemetry_snapshot(*t_b, s);
+    }
+
+    ocg::ControlServer::LinkMap tlink = {
+        {"link-A", t_a.get()},
+        {"link-B", t_b.get()},
+    };
+    ocg::ControlServerConfig tcfg;
+    tcfg.endpoint           = "tcp://127.0.0.1:5571";
+    tcfg.telemetry_endpoint = "tcp://127.0.0.1:5572";
+    tcfg.telemetry_rate_hz  = 50.0;           // 20 ms tick — plenty of frames in the window
+    tcfg.recv_timeout_ms    = 50;
+    ocg::ControlServer tserver(std::move(tcfg), std::move(tlink));
+    tserver.start();
+
+    // SUB client filtering to "link-B" only.
+    void* sub_ctx = zmq_ctx_new();
+    require(sub_ctx != nullptr, "SUB zmq_ctx_new");
+    void* sub = zmq_socket(sub_ctx, ZMQ_SUB);
+    require(sub != nullptr, "SUB zmq_socket");
+    const int rcv_to = 800;
+    zmq_setsockopt(sub, ZMQ_RCVTIMEO, &rcv_to, sizeof(rcv_to));
+    zmq_setsockopt(sub, ZMQ_SUBSCRIBE, "link-B", 6);
+    bool connected = false;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+      if (zmq_connect(sub, "tcp://127.0.0.1:5572") == 0) { connected = true; break; }
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    require(connected, "SUB should connect to telemetry endpoint");
+
+    // Drain the SUB queue for ~500 ms (PUB-SUB is lossy on the SUB
+    // connect race; we just need ≥1 frame for link-B to land).
+    bool got_b = false;
+    bool got_a = false;
+    char buf[2048];
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(800);
+    while (std::chrono::steady_clock::now() < deadline) {
+      const int rcvd = zmq_recv(sub, buf, sizeof(buf), 0);
+      if (rcvd < 0) {
+        if (zmq_errno() == EAGAIN) continue;
+        break;
+      }
+      const std::string frame(buf, static_cast<std::size_t>(rcvd));
+      if (frame.rfind("link-B ", 0) == 0) {
+        got_b = true;
+        require(frame.find("\"event\":\"telemetry\"") != std::string::npos,
+                "v3.0: telemetry frame has event field");
+        require(frame.find("\"link_id\":\"link-B\"") != std::string::npos,
+                "v3.0: telemetry frame names link-B");
+        require(frame.find("\"profile_active\":true") != std::string::npos,
+                "v3.0: telemetry frame reports profile_active=true for link-B");
+      } else if (frame.rfind("link-A ", 0) == 0) {
+        got_a = true;
+      }
+    }
+    require(got_b, "v3.0: SUB filtered to 'link-B' should receive at least one frame");
+    require(!got_a, "v3.0: SUB filtered to 'link-B' should NOT receive link-A frames");
+
+    zmq_close(sub);
+    zmq_ctx_term(sub_ctx);
+
+    // Stats should reflect frames sent (>0; exact count depends on the
+    // ~500 ms drain window and the 50 Hz rate, but it's definitely > 0).
+    const auto s = tserver.stats();
+    require(s.telemetry_frames > 0, "v3.0: telemetry_frames counter should advance");
+  }
+
   std::cout << "test_control_server OK\n";
   return 0;
 }

@@ -2,6 +2,7 @@
 
 #include <zmq.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -10,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -339,6 +341,13 @@ void ControlServer::start()
   if (running_.exchange(true)) return;
   stop_requested_.store(false, std::memory_order_relaxed);
   thread_ = std::thread([this] { run_loop(); });
+
+  // v3.0 TM2: spin up the telemetry-publisher thread iff an endpoint
+  // is configured. Independent of the REP loop; can be disabled
+  // without affecting control-plane functionality.
+  if (!config_.telemetry_endpoint.empty() && !telemetry_running_.exchange(true)) {
+    telemetry_thread_ = std::thread([this] { run_telemetry_loop(); });
+  }
 }
 
 void ControlServer::stop()
@@ -346,6 +355,10 @@ void ControlServer::stop()
   if (!running_.exchange(false)) return;
   stop_requested_.store(true, std::memory_order_relaxed);
   if (thread_.joinable()) thread_.join();
+
+  if (telemetry_running_.exchange(false)) {
+    if (telemetry_thread_.joinable()) telemetry_thread_.join();
+  }
 }
 
 ControlServer::Stats ControlServer::stats() const
@@ -356,6 +369,8 @@ ControlServer::Stats ControlServer::stats() const
   s.updates_rejected  = updates_rejected_.load(std::memory_order_relaxed);
   s.batches_committed = batches_committed_.load(std::memory_order_relaxed);
   s.batches_aborted   = batches_aborted_.load(std::memory_order_relaxed);
+  s.telemetry_frames  = telemetry_frames_.load(std::memory_order_relaxed);
+  s.telemetry_drops   = telemetry_drops_.load(std::memory_order_relaxed);
   return s;
 }
 
@@ -922,6 +937,83 @@ void ControlServer::run_loop()
 
     const std::string reply = handle_message(body);
     zmq_send(sock, reply.data(), reply.size(), 0);
+  }
+
+  zmq_close(sock);
+  zmq_ctx_term(ctx);
+}
+
+// v3.0 TM2: telemetry-publisher loop. Owns its own ZMQ context so a
+// hung subscriber can't backpressure the REP control plane. Per tick,
+// iterates the link_map and sends one PUB frame per link, with link_id
+// as the topic prefix (TM3 below). Sleeps `1 / telemetry_rate_hz`
+// between ticks; tunable via ControlServerConfig.
+void ControlServer::run_telemetry_loop()
+{
+  void* ctx = zmq_ctx_new();
+  if (ctx == nullptr) return;
+  void* sock = zmq_socket(ctx, ZMQ_PUB);
+  if (sock == nullptr) { zmq_ctx_term(ctx); return; }
+
+  // Default send HWM is 1000 messages — adequate for 20 Hz × 16 links
+  // (~3 seconds of buffered frames before drops). Operator can dial
+  // the rate down for thicker buffers.
+  if (zmq_bind(sock, config_.telemetry_endpoint.c_str()) != 0) {
+    zmq_close(sock);
+    zmq_ctx_term(ctx);
+    return;
+  }
+
+  const double rate = config_.telemetry_rate_hz > 0.0
+                      ? config_.telemetry_rate_hz : 20.0;
+  const auto period = std::chrono::microseconds(
+      static_cast<long long>(1'000'000.0 / rate));
+
+  while (!stop_requested_.load(std::memory_order_relaxed)) {
+    const auto wake = std::chrono::steady_clock::now() + period;
+
+    for (const auto& [link_id, ctl_ptr] : link_map_) {
+      if (ctl_ptr == nullptr) continue;
+      const TelemetrySnapshot ts = read_telemetry_snapshot(*ctl_ptr);
+
+      // Build the JSON frame. link_id as topic prefix → subscribers
+      // filter via setsockopt(ZMQ_SUBSCRIBE, "ue0-gnb0", …). Frame
+      // body is the prefix followed by a space and the JSON payload.
+      std::ostringstream f;
+      f << link_id << " "
+        << "{\"event\":\"telemetry\","
+        << "\"link_id\":\"" << link_id << "\","
+        << "\"slot\":" << ts.slot << ","
+        << "\"seqno\":" << ts.live_seqno << ","
+        << "\"live\":{"
+        <<   "\"path_loss_db\":"        << ts.live.path_loss_db        << ","
+        <<   "\"awgn_snr_db\":"         << ts.live.awgn_snr_db         << ","
+        <<   "\"cfo_hz\":"              << ts.live.cfo_hz              << ","
+        <<   "\"tap0_delay_samples\":"  << ts.live.tap0_delay_samples  << ","
+        <<   "\"tap0_gain_db\":"        << ts.live.tap0_gain_db        << ","
+        <<   "\"tap0_phase_rad\":"      << ts.live.tap0_phase_rad      << ","
+        <<   "\"los_k_db\":"            << ts.live.los_k_db
+        << "},"
+        << "\"profile_active\":"   << (ts.profile_active ? "true" : "false") << ","
+        << "\"warmup_until_slot\":" << ts.warmup_until_slot
+        << "}";
+      const std::string frame = f.str();
+
+      const int rc = zmq_send(sock, frame.data(), frame.size(), ZMQ_DONTWAIT);
+      if (rc >= 0) {
+        telemetry_frames_.fetch_add(1, std::memory_order_relaxed);
+      } else if (zmq_errno() == EAGAIN) {
+        telemetry_drops_.fetch_add(1, std::memory_order_relaxed);
+      }
+    }
+
+    // Sleep until the next tick. Subdivide so stop() latency stays
+    // bounded by ~100 ms instead of by the telemetry period (which at
+    // 1 Hz would otherwise mean a 1-second stop delay).
+    while (std::chrono::steady_clock::now() < wake) {
+      if (stop_requested_.load(std::memory_order_relaxed)) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
   }
 
   zmq_close(sock);

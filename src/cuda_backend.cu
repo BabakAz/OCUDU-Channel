@@ -768,6 +768,18 @@ public:
                   << " link_id=" << edge.link_key << '\n';
         lms_for_snap.warmup_until_slot = 0;
       }
+
+      // v3.0 TM1: publish per-link telemetry snapshot for the optional
+      // telemetry-publisher thread.
+      {
+        TelemetrySnapshot ts;
+        ts.slot              = snap_idx;
+        ts.live_seqno        = lms_for_snap.live_seqno;
+        ts.live              = lms_for_snap.live;
+        ts.profile_active    = lms_for_snap.live_profile_active;
+        ts.warmup_until_slot = lms_for_snap.warmup_until_slot;
+        publish_telemetry_snapshot(lms_for_snap.ctl, ts);
+      }
       if (sp.use_device_channel) {
         // Device-kernel path: build_steps reads the SHARED source slot for
         // this edge's snr_db power estimator. Edges sharing a source share

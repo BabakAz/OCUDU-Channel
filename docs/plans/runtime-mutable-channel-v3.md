@@ -1,6 +1,6 @@
 # Plan — Phase 3 v3: telemetry feed, force-flag effects, hardware checks
 
-Status: **draft** · Builds on: [v1 plan](runtime-mutable-channel.md) (landed) + [v2 plan](runtime-mutable-channel-v2.md) (landed) · Phase target: **Phase 3.x** · Effort estimate: **~5–8 focused days across three sub-phases** · Risk: **mixed** — v3.0 telemetry is low-risk additive surface; v3.1 force-flag effects touch the dispatch gate (medium-high); v3.2 hardware checks are mostly read-only probes (low).
+Status: **v3.0 landed (TM1+TM2+TM3)** · Builds on: [v1 plan](runtime-mutable-channel.md) (landed) + [v2 plan](runtime-mutable-channel-v2.md) (landed) · Phase target: **Phase 3.x** · v3.0 effort actual: **~1 focused commit**. v3.1 (force-flag warning, Option C from locked decisions) and v3.2 (hardware checks) remain.
 
 ## Goal in one sentence
 

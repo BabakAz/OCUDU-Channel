@@ -44,6 +44,16 @@ struct ControlServerConfig {
   // capture and assert log content. Pass an empty std::function to
   // suppress logging entirely.
   std::function<void(std::string_view)> logger;
+
+  // v3.0: optional PUB socket for per-link telemetry. Disabled when
+  // `telemetry_endpoint` is empty (the default). When set, a dedicated
+  // background thread iterates the link_map every
+  // `1 / telemetry_rate_hz` seconds and PUBs one JSON frame per link,
+  // with `link_id` as the ZMQ topic prefix so subscribers filter via
+  // setsockopt(ZMQ_SUBSCRIBE, "ue0-gnb0", …). Empty subscription
+  // receives everything.
+  std::string telemetry_endpoint;
+  double      telemetry_rate_hz = 20.0;
 };
 
 class ControlServer {
@@ -81,6 +91,8 @@ public:
     std::uint64_t updates_rejected    = 0;
     std::uint64_t batches_committed   = 0;   // v2.3
     std::uint64_t batches_aborted     = 0;   // v2.3
+    std::uint64_t telemetry_frames    = 0;   // v3.0
+    std::uint64_t telemetry_drops     = 0;   // v3.0 (PUB HWM hit)
   };
   Stats stats() const;
 
@@ -127,8 +139,18 @@ private:
   mutable std::atomic<std::uint64_t> updates_rejected_{0};
   mutable std::atomic<std::uint64_t> batches_committed_{0};
   mutable std::atomic<std::uint64_t> batches_aborted_{0};
+  mutable std::atomic<std::uint64_t> telemetry_frames_{0};
+  mutable std::atomic<std::uint64_t> telemetry_drops_{0};
 
   void run_loop();
+  // v3.0 TM2: telemetry-publisher loop runs on a separate background
+  // thread. Started by start() when telemetry_endpoint is non-empty;
+  // joined by stop(). Reads each link's telemetry seqlock snapshot and
+  // PUBs one JSON frame per link per tick at telemetry_rate_hz.
+  void run_telemetry_loop();
+
+  std::thread telemetry_thread_;
+  std::atomic<bool> telemetry_running_{false};
 };
 
 }  // namespace ocg

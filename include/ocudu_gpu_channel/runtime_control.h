@@ -34,6 +34,20 @@
 
 namespace ocg {
 
+// v3.0 TM1: snapshot of per-link state the telemetry thread publishes.
+// Written by the backend's snap hot path at the end of every serve;
+// read by the telemetry thread on its own cadence (default 20 Hz —
+// see ControlServerConfig::telemetry_rate_hz). Torn-read protection
+// via the seqlock pattern on telemetry_write_seq (see write helper
+// below) — readers loop until the pre/post seq agree, no locking.
+struct TelemetrySnapshot {
+  std::uint64_t slot              = 0;
+  std::uint32_t live_seqno        = 0;
+  MutableParams live;
+  bool          profile_active    = false;
+  std::uint64_t warmup_until_slot = 0;
+};
+
 // v2 ProfileShadow — the multi-tap payload a `profile_swap` REQ writes.
 // Stored max-sized (kDeviceMaxTaps) so the shadow → live copy is a single
 // POD memcpy, no heap allocation in the hot path. Only the first
@@ -79,6 +93,14 @@ struct BrokerLinkControl {
   std::atomic<std::uint64_t> current_slot{0};
 
   std::atomic<std::uint32_t> seqno{0};        // bumped after every shadow write
+
+  // v3.0 telemetry snapshot — written by the backend snap path each
+  // slot; read by the optional telemetry-publisher thread. Seqlock
+  // ordering: writer pre-bumps to an odd value, writes the POD, post-
+  // bumps to the next even value. Readers do (load, copy, load) and
+  // retry if either pre-load was odd or pre != post.
+  TelemetrySnapshot          telemetry;
+  std::atomic<std::uint64_t> telemetry_write_seq{0};
 
   BrokerLinkControl() = default;
 
@@ -150,6 +172,42 @@ inline bool snap_profile_from_shadow(ProfileShadow& live_profile,
   if (!ctl.profile_pending) return false;
   live_profile = ctl.shadow_profile;
   return true;
+}
+
+// v3.0 TM1: publish a telemetry snapshot into ctl.telemetry using the
+// seqlock pattern. Single-writer (the per-link backend snap thread);
+// no locking. Readers call read_telemetry_snapshot() which retries on
+// observed concurrent write.
+inline void publish_telemetry_snapshot(BrokerLinkControl& ctl,
+                                       const TelemetrySnapshot& snap)
+{
+  const std::uint64_t pre = ctl.telemetry_write_seq.load(std::memory_order_relaxed);
+  // Pre-bump to an odd value so any concurrent reader sees the
+  // in-progress marker and retries.
+  ctl.telemetry_write_seq.store(pre + 1, std::memory_order_release);
+  ctl.telemetry = snap;
+  // Post-bump to the next even value; readers compare pre vs post and
+  // accept only if both even and equal.
+  ctl.telemetry_write_seq.store(pre + 2, std::memory_order_release);
+}
+
+// Read the published telemetry snapshot using the seqlock pattern.
+// Loops at most `max_retries` times before returning the most recent
+// non-torn read or, if always torn, the last attempted copy. In
+// practice the write window is sub-microsecond so two reads in a row
+// almost always succeed.
+inline TelemetrySnapshot read_telemetry_snapshot(const BrokerLinkControl& ctl,
+                                                 int max_retries = 8)
+{
+  TelemetrySnapshot copy{};
+  for (int attempt = 0; attempt < max_retries; ++attempt) {
+    const std::uint64_t pre = ctl.telemetry_write_seq.load(std::memory_order_acquire);
+    if (pre & 1ULL) continue;        // write in progress
+    copy = ctl.telemetry;
+    const std::uint64_t post = ctl.telemetry_write_seq.load(std::memory_order_acquire);
+    if (pre == post) return copy;    // consistent snapshot
+  }
+  return copy;
 }
 
 // Initialise BrokerLinkControl::shadow from the YAML-derived MutableParams.
