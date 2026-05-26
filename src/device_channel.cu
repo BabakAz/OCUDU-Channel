@@ -10,6 +10,7 @@
 // Plan and rationale: docs/plans/device-channel-pipeline.md.
 
 #include "ocudu_gpu_channel/device_channel.h"
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <cuda_runtime.h>
@@ -408,7 +409,12 @@ void refresh_tap0_from_live(DeviceLinkState& s)
   const double tau_int = std::floor(delay);
   s.tap_delay_int[0] = static_cast<int>(tau_int);
   s.tap_frac[0]      = static_cast<float>(delay - tau_int);
-  compute_windowed_sinc_taps(s.tap_frac[0], s.tap_polyphase[0]);
+  // Bridge: compute_windowed_sinc_taps takes std::array<float,8>&; the
+  // DeviceLinkState's tap_polyphase[K] is a C array. Compute into a temp,
+  // then memcpy element-wise.
+  std::array<float, kTdlFracFilterTaps> tmp_poly{};
+  compute_windowed_sinc_taps(s.tap_frac[0], tmp_poly);
+  for (int i = 0; i < kTdlFracFilterTaps; ++i) s.tap_polyphase[0][i] = tmp_poly[i];
 
   s.tap_gain_amp[0] = static_cast<float>(std::pow(10.0, s.live.tap0_gain_db / 20.0));
   s.tap_cos_phi[0]  = static_cast<float>(std::cos(s.live.tap0_phase_rad));
@@ -450,7 +456,9 @@ void refresh_all_taps_from_live(DeviceLinkState& s, int n_taps, const TapSpec* t
     const double tau_int = std::floor(t.delay_samples);
     s.tap_delay_int[k] = static_cast<int>(tau_int);
     s.tap_frac[k]      = static_cast<float>(t.delay_samples - tau_int);
-    compute_windowed_sinc_taps(s.tap_frac[k], s.tap_polyphase[k]);
+    std::array<float, kTdlFracFilterTaps> tmp_poly{};
+    compute_windowed_sinc_taps(s.tap_frac[k], tmp_poly);
+    for (int i = 0; i < kTdlFracFilterTaps; ++i) s.tap_polyphase[k][i] = tmp_poly[i];
     s.tap_gain_amp[k]  = static_cast<float>(std::pow(10.0, t.gain_db / 20.0));
     s.tap_cos_phi[k]   = static_cast<float>(std::cos(t.phase_rad));
     s.tap_sin_phi[k]   = static_cast<float>(std::sin(t.phase_rad));

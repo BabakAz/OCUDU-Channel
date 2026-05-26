@@ -1,3 +1,4 @@
+#include "ocudu_gpu_channel/backend.h"
 #include "ocudu_gpu_channel/cuda_backend.h"
 #include "ocudu_gpu_channel/delay.h"
 #include "ocudu_gpu_channel/device_channel.h"
@@ -327,52 +328,40 @@ struct CudaSuperposeState {
 
 void free_superpose_state(CudaSuperposeState& state)
 {
-  if (state.d2h_done != nullptr) {
-    cudaEventDestroy(state.d2h_done);
-  }
-  if (state.kernel_done != nullptr) {
-    cudaEventDestroy(state.kernel_done);
-  }
-  if (state.h2d_done != nullptr) {
-    cudaEventDestroy(state.h2d_done);
-  }
-  if (state.h2d_start != nullptr) {
-    cudaEventDestroy(state.h2d_start);
-  }
-  if (state.stream != nullptr) {
-    cudaStreamDestroy(state.stream);
-  }
-  if (state.device_source_iq != nullptr) {
-    cudaFree(state.device_source_iq);
-  }
-  if (state.host_source_iq != nullptr) {
-    cudaFreeHost(state.host_source_iq);
-  }
-  if (state.device_link_states != nullptr) {
-    cudaFree(state.device_link_states);
-  }
-  if (state.device_rx_steps != nullptr) {
-    cudaFree(state.device_rx_steps);
-  }
-  if (state.device_step_meta != nullptr) {
-    cudaFree(state.device_step_meta);
-  }
-  if (state.device_steps != nullptr) {
-    cudaFree(state.device_steps);
-  }
-  if (state.device_output != nullptr) {
-    cudaFree(state.device_output);
-  }
-  if (state.device_staged != nullptr) {
-    cudaFree(state.device_staged);
-  }
-  if (state.host_output != nullptr) {
-    cudaFreeHost(state.host_output);
-  }
-  if (state.host_staged != nullptr) {
-    cudaFreeHost(state.host_staged);
-  }
-  state = {};
+  // v3 follow-on: CudaSuperposeState contains LinkModelState (rx_model)
+  // which carries a non-movable atomic via BrokerLinkControl, so the
+  // implicit operator= is deleted. Null each pointer inline after
+  // freeing so a re-entrant call (re-prepare / dtor) doesn't
+  // double-free. Vectors clear themselves; the rx_model is reset by
+  // the next init_model_state call when prepare re-fires.
+  if (state.d2h_done != nullptr)       { cudaEventDestroy(state.d2h_done);       state.d2h_done = nullptr; }
+  if (state.kernel_done != nullptr)    { cudaEventDestroy(state.kernel_done);    state.kernel_done = nullptr; }
+  if (state.h2d_done != nullptr)       { cudaEventDestroy(state.h2d_done);       state.h2d_done = nullptr; }
+  if (state.h2d_start != nullptr)      { cudaEventDestroy(state.h2d_start);      state.h2d_start = nullptr; }
+  if (state.stream != nullptr)         { cudaStreamDestroy(state.stream);        state.stream = nullptr; }
+  if (state.device_source_iq != nullptr)   { cudaFree(state.device_source_iq);    state.device_source_iq = nullptr; }
+  if (state.host_source_iq != nullptr)     { cudaFreeHost(state.host_source_iq);  state.host_source_iq = nullptr; }
+  if (state.device_link_states != nullptr) { cudaFree(state.device_link_states);  state.device_link_states = nullptr; }
+  if (state.device_rx_steps != nullptr)    { cudaFree(state.device_rx_steps);     state.device_rx_steps = nullptr; }
+  if (state.device_step_meta != nullptr)   { cudaFree(state.device_step_meta);    state.device_step_meta = nullptr; }
+  if (state.device_steps != nullptr)       { cudaFree(state.device_steps);        state.device_steps = nullptr; }
+  if (state.device_output != nullptr)      { cudaFree(state.device_output);       state.device_output = nullptr; }
+  if (state.device_staged != nullptr)      { cudaFree(state.device_staged);       state.device_staged = nullptr; }
+  if (state.host_output != nullptr)        { cudaFreeHost(state.host_output);     state.host_output = nullptr; }
+  if (state.host_staged != nullptr)        { cudaFreeHost(state.host_staged);     state.host_staged = nullptr; }
+  state.capacity = 0;
+  state.max_links = 0;
+  state.max_steps = 0;
+  state.num_sources = 0;
+  state.use_device_channel = false;
+  state.host_link_states.clear();
+  state.host_link_states.shrink_to_fit();
+  state.source_first_edge.clear();
+  state.source_first_edge.shrink_to_fit();
+  state.host_steps.clear();
+  state.host_steps.shrink_to_fit();
+  state.host_step_meta.clear();
+  state.host_step_meta.shrink_to_fit();
 }
 
 class CudaChannelProcessor final : public ChannelProcessor {

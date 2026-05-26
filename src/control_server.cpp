@@ -276,11 +276,6 @@ std::string make_error_reply(const std::string& msg)
   return std::string("{\"ok\":false,\"error\":\"") + json_escape(msg) + "\"}";
 }
 
-std::string make_success_reply(std::uint32_t seqno)
-{
-  return std::string("{\"ok\":true,\"seqno\":") + std::to_string(seqno) + "}";
-}
-
 // v2.1: REP body that includes the link's expected apply slot. The slot
 // is read from ctl.current_slot (last value the server thread wrote);
 // scheduled-in-future updates report take_effect_at_slot instead. The

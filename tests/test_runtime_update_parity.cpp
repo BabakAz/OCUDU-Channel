@@ -92,6 +92,16 @@ ocg::TopologyConfig make_topology(ocg::Backend backend)
 }
 
 // Run one slot through `proc` and return the output buffer.
+// Compute the broker's canonical link key for the test's single-link
+// topology. Mirrors ocg::link_key(): "<from>><to>:<model_id>". CUDA
+// backend requires this exact key (no lazy creation); CPU backend
+// lazy-creates so anything works, but for parity we always pass the
+// real key.
+std::string test_link_key(const ocg::ModelConfig& model)
+{
+  return "gnb0>ue0:" + model.id;
+}
+
 std::vector<ocg::IqSample> run_slot(ocg::ChannelProcessor& proc,
                                     const ocg::ModelConfig& model,
                                     const std::vector<ocg::IqSample>& input)
@@ -99,39 +109,43 @@ std::vector<ocg::IqSample> run_slot(ocg::ChannelProcessor& proc,
   std::vector<ocg::IqSample> output(input.size(), {0.0F, 0.0F});
   const std::span<const ocg::IqSample> input_span(input.data(), input.size());
   std::vector<ocg::SuperpositionInput> edges;
-  edges.push_back({.link_key = "gnb0>ue0", .model = &model, .samples = input_span});
+  edges.push_back({.link_key = test_link_key(model), .model = &model, .samples = input_span});
   proc.process_superposition("ue0", edges, nullptr,
                              23040000ULL, std::span<ocg::IqSample>(output.data(), output.size()));
   return output;
 }
 
-// Bump shadow + seqno on the link "gnb0>ue0" — simulates a control-plane
-// write without involving ControlServer.
-void write_shadow_path_loss(ocg::ChannelProcessor& proc, float new_db)
+ocg::BrokerLinkControl* lookup_ctl(ocg::ChannelProcessor& proc,
+                                   const ocg::ModelConfig& model)
 {
   auto map = proc.collect_control_links();
-  auto it = map.find("gnb0>ue0");
+  auto it = map.find(test_link_key(model));
   require(it != map.end() && it->second != nullptr, "link found in control map");
-  it->second->shadow.path_loss_db = new_db;
-  it->second->seqno.fetch_add(1, std::memory_order_release);
+  return it->second;
 }
 
-void write_shadow_awgn_snr(ocg::ChannelProcessor& proc, float snr_db)
+void write_shadow_path_loss(ocg::ChannelProcessor& proc,
+                            const ocg::ModelConfig& model, float new_db)
 {
-  auto map = proc.collect_control_links();
-  auto it = map.find("gnb0>ue0");
-  require(it != map.end() && it->second != nullptr, "link found in control map");
-  it->second->shadow.awgn_snr_db = snr_db;
-  it->second->seqno.fetch_add(1, std::memory_order_release);
+  auto* ctl = lookup_ctl(proc, model);
+  ctl->shadow.path_loss_db = new_db;
+  ctl->seqno.fetch_add(1, std::memory_order_release);
 }
 
-void write_shadow_tap0_gain(ocg::ChannelProcessor& proc, float gain_db)
+void write_shadow_awgn_snr(ocg::ChannelProcessor& proc,
+                           const ocg::ModelConfig& model, float snr_db)
 {
-  auto map = proc.collect_control_links();
-  auto it = map.find("gnb0>ue0");
-  require(it != map.end() && it->second != nullptr, "link found in control map");
-  it->second->shadow.tap0_gain_db = gain_db;
-  it->second->seqno.fetch_add(1, std::memory_order_release);
+  auto* ctl = lookup_ctl(proc, model);
+  ctl->shadow.awgn_snr_db = snr_db;
+  ctl->seqno.fetch_add(1, std::memory_order_release);
+}
+
+void write_shadow_tap0_gain(ocg::ChannelProcessor& proc,
+                            const ocg::ModelConfig& model, float gain_db)
+{
+  auto* ctl = lookup_ctl(proc, model);
+  ctl->shadow.tap0_gain_db = gain_db;
+  ctl->seqno.fetch_add(1, std::memory_order_release);
 }
 
 // v2.0-F3a: write a 2-tap profile_swap into the link's shadow. Caller
@@ -140,13 +154,12 @@ void write_shadow_tap0_gain(ocg::ChannelProcessor& proc, float gain_db)
 // does without going through ZMQ).
 void write_shadow_profile_swap_2tap(
     ocg::ChannelProcessor& proc,
+    const ocg::ModelConfig& model,
     double delay0, double gain_db0,
     double delay1, double gain_db1)
 {
-  auto map = proc.collect_control_links();
-  auto it = map.find("gnb0>ue0");
-  require(it != map.end() && it->second != nullptr, "link found in control map");
-  ocg::ProfileShadow& sp = it->second->shadow_profile;
+  auto* ctl = lookup_ctl(proc, model);
+  ocg::ProfileShadow& sp = ctl->shadow_profile;
   sp.n_taps = 2;
   sp.taps[0].delay_samples = delay0;
   sp.taps[0].gain_db       = gain_db0;
@@ -158,8 +171,8 @@ void write_shadow_profile_swap_2tap(
   sp.taps[1].is_los        = false;
   sp.fading_enabled = false;
   sp.force = false;
-  it->second->profile_pending = true;
-  it->second->seqno.fetch_add(1, std::memory_order_release);
+  ctl->profile_pending = true;
+  ctl->seqno.fetch_add(1, std::memory_order_release);
 }
 
 double mean_power(const std::vector<ocg::IqSample>& samples)
@@ -221,7 +234,7 @@ int main()
 
   // Update path_loss to -20 dB → 10x gain. (Negative path_loss_db = gain
   // in this code path; the factor is 10^(-path_loss_db/20).)
-  write_shadow_path_loss(cpu, -20.0F);
+  write_shadow_path_loss(cpu, cpu_model, -20.0F);
   auto out1_cpu = run_slot(cpu, cpu_model, input);
   require(near_float(out1_cpu[0].i, 10.0F),
           "slot 1 CPU: -20 dB path_loss → 10x amplitude");
@@ -229,7 +242,7 @@ int main()
           "slot 1 CPU: 10x scaling preserves Q sign + magnitude");
 
   // Update to +20 dB → 0.1x gain.
-  write_shadow_path_loss(cpu, 20.0F);
+  write_shadow_path_loss(cpu, cpu_model, 20.0F);
   auto out2_cpu = run_slot(cpu, cpu_model, input);
   require(near_float(out2_cpu[0].i, 0.1F),
           "slot 2 CPU: +20 dB path_loss → 0.1x amplitude");
@@ -245,12 +258,12 @@ int main()
     require(max_abs_diff(out0_cpu, out0_cuda) <= kParityTolerance,
             "slot 0 CPU↔CUDA parity within 1e-3");
 
-    write_shadow_path_loss(*cuda, -20.0F);
+    write_shadow_path_loss(*cuda, cuda_model, -20.0F);
     auto out1_cuda = run_slot(*cuda, cuda_model, input);
     require(max_abs_diff(out1_cpu, out1_cuda) <= kParityTolerance,
             "slot 1 CPU↔CUDA parity within 1e-3 after first runtime update");
 
-    write_shadow_path_loss(*cuda, 20.0F);
+    write_shadow_path_loss(*cuda, cuda_model, 20.0F);
     auto out2_cuda = run_slot(*cuda, cuda_model, input);
     require(max_abs_diff(out2_cpu, out2_cuda) <= kParityTolerance,
             "slot 2 CPU↔CUDA parity within 1e-3 after second runtime update");
@@ -293,13 +306,13 @@ int main()
     require(near_float(t0[1].i, 1.0F), "tap0: gain=0 dB → amplitude 1.0");
 
     // Runtime update: tap0_gain_db = 6 dB → ~2x amplitude.
-    write_shadow_tap0_gain(tap_cpu, 6.020599913F);
+    write_shadow_tap0_gain(tap_cpu, tap_model, 6.020599913F);
     auto t1 = run_slot(tap_cpu, tap_model, unit);
     require(near_float(t1[1].i, 2.0F, 1e-3F),
             "tap0: runtime gain=+6 dB → amplitude ~2.0");
 
     // Runtime update: tap0_gain_db = -6 dB → ~0.5x amplitude.
-    write_shadow_tap0_gain(tap_cpu, -6.020599913F);
+    write_shadow_tap0_gain(tap_cpu, tap_model, -6.020599913F);
     auto t2 = run_slot(tap_cpu, tap_model, unit);
     require(near_float(t2[1].i, 0.5F, 1e-3F),
             "tap0: runtime gain=-6 dB → amplitude ~0.5");
@@ -329,14 +342,14 @@ int main()
             "AWGN: snr=20 → output power should be ~1.01 (signal + noise)");
 
     // Slot 1: runtime update snr_db=0 → noise_power = 1.0 → output power ≈ 2.0.
-    write_shadow_awgn_snr(awgn_cpu, 0.0F);
+    write_shadow_awgn_snr(awgn_cpu, awgn_model, 0.0F);
     auto out_snr0 = run_slot(awgn_cpu, awgn_model, unit_input);
     const double p_snr0 = mean_power(out_snr0);
     require(std::fabs(p_snr0 - 2.0) < 0.5,
             "AWGN: snr=0 → output power should be ~2.0 after runtime update");
 
     // Slot 2: back up to a quieter snr_db=40 → noise_power ≈ 1e-4 → ≈ 1.0001.
-    write_shadow_awgn_snr(awgn_cpu, 40.0F);
+    write_shadow_awgn_snr(awgn_cpu, awgn_model, 40.0F);
     auto out_snr40 = run_slot(awgn_cpu, awgn_model, unit_input);
     const double p_snr40 = mean_power(out_snr40);
     require(std::fabs(p_snr40 - 1.0) < 0.1,
@@ -383,8 +396,9 @@ int main()
 
     // Runtime profile swap to 2 taps: impulse + an echo at delay 3 with
     // -6 dB (~0.5x amplitude).
-    write_shadow_profile_swap_2tap(proc_cpu, /*d0=*/0.0, /*g0=*/0.0,
-                                                /*d1=*/3.0, /*g1=*/-6.020599913);
+    write_shadow_profile_swap_2tap(proc_cpu, prof_model,
+                                   /*d0=*/0.0, /*g0=*/0.0,
+                                   /*d1=*/3.0, /*g1=*/-6.020599913);
     // Fresh impulse input — the cross-slot delay_line still has residue
     // from the prior slot's impulse, so this test deliberately uses zero
     // input plus a fresh impulse to keep the assertion clean.
@@ -423,12 +437,10 @@ int main()
     // take_effect_at_slot=4. Mirrors what ControlServer's
     // handle_scalar_update + v2.1 take_effect_at_slot does, without ZMQ.
     {
-      auto map = tea_cpu.collect_control_links();
-      auto it = map.find("gnb0>ue0");
-      require(it != map.end() && it->second != nullptr, "link in control map");
-      it->second->shadow.path_loss_db = -20.0F;
-      it->second->take_effect_at_slot = 4;
-      it->second->seqno.fetch_add(1, std::memory_order_release);
+      auto* ctl = lookup_ctl(tea_cpu, tea_model);
+      ctl->shadow.path_loss_db = -20.0F;
+      ctl->take_effect_at_slot = 4;
+      ctl->seqno.fetch_add(1, std::memory_order_release);
     }
 
     // Slots 1, 2, 3: gate not yet open → unit gain.
@@ -471,7 +483,7 @@ int main()
 
     // Profile swap: same two-tap (impulse + echo at delay 3) used in
     // v2.0-F3a, no take_effect_at_slot → applies ASAP.
-    write_shadow_profile_swap_2tap(warm_cpu, 0.0, 0.0, 3.0, -6.020599913);
+    write_shadow_profile_swap_2tap(warm_cpu, warm_model, 0.0, 0.0, 3.0, -6.020599913);
 
     // First slot post-swap: snap fires, warmup begin emitted.
     (void)run_slot(warm_cpu, warm_model, unit);
@@ -557,18 +569,16 @@ int main()
     // Manually stage a profile_swap shadow with force=true (mirrors what
     // ControlServer::handle_profile_swap does under the hood).
     {
-      auto map = proc.collect_control_links();
-      auto it = map.find("gnb0>ue0");
-      require(it != map.end() && it->second != nullptr, "v3.1: link in control map");
-      ocg::ProfileShadow& sp = it->second->shadow_profile;
+      auto* ctl = lookup_ctl(proc, model);
+      ocg::ProfileShadow& sp = ctl->shadow_profile;
       sp.n_taps = 1;
       sp.taps[0].delay_samples = 0.0;
       sp.taps[0].gain_db       = 0.0;
       sp.taps[0].phase_rad     = 0.0;
       sp.taps[0].is_los        = false;
       sp.force = true;
-      it->second->profile_pending = true;
-      it->second->seqno.fetch_add(1, std::memory_order_release);
+      ctl->profile_pending = true;
+      ctl->seqno.fetch_add(1, std::memory_order_release);
     }
 
     // One more slot → snap fires.
@@ -585,10 +595,8 @@ int main()
             "v3.1: warning should explain the inertness");
 
     // Counter bumped to 1.
-    auto map = proc.collect_control_links();
-    auto it = map.find("gnb0>ue0");
-    require(it != map.end() && it->second != nullptr, "v3.1: ctl exists");
-    require(it->second->force_inert_warnings.load() == 1,
+    auto* ctl = lookup_ctl(proc, model);
+    require(ctl->force_inert_warnings.load() == 1,
             "v3.1: force_inert_warnings should increment to 1");
   }
 
