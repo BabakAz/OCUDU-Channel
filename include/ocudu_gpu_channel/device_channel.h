@@ -134,6 +134,19 @@ bool build_device_link_state(
     int src_index,
     DeviceLinkState& out);
 
+// Phase 3 v1-fin-B: recompute the leading-tap (tap 0) derived fields in
+// `s` from `s.live` (tap0_delay_samples / tap0_gain_db / tap0_phase_rad /
+// los_k_db). Used by the snap-from-shadow path in cuda_backend.cu when
+// the ZMQ control plane has bumped the link's seqno: the host first D2H
+// reads the DeviceLinkState back to capture device-owned cross-slot
+// state (delay_line + slot_start_samples), calls this to refresh the
+// tap-0 derived fields from the snapped live values, then H2D re-uploads
+// the whole struct. tap_*[1..] are left untouched (multi-tap profile
+// swaps are v2). LOS factors are recomputed only when tap_is_los[0] is
+// set in the original YAML; los_k_db on a non-LOS tap is silently
+// ignored, matching the build_device_link_state semantics.
+void refresh_tap0_from_live(DeviceLinkState& s);
+
 // Per-edge channel kernel.
 //
 // For each (edge k, output sample idx), computes the multi-tap polyphase

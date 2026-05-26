@@ -648,10 +648,53 @@ public:
       }
       // Phase 3 C2b: snap any pending shadow update from the control plane
       // into `live` before build_steps reads it. No-op when seqno hasn't
-      // advanced (single acquire-load + early-return). In v1 with no control
-      // plane wired this is always a no-op.
+      // advanced (single acquire-load + early-return).
       auto& lms_for_snap = ls_it->second.model;
-      snap_mutable_params(lms_for_snap.live, lms_for_snap.live_seqno, lms_for_snap.ctl);
+      const bool live_changed = snap_mutable_params(
+          lms_for_snap.live, lms_for_snap.live_seqno, lms_for_snap.ctl);
+
+      // Phase 3 v1-fin-B: when the snap changed tap-0 / LOS params, refresh
+      // the derived fields the kernel reads from DeviceLinkState. Round-trip
+      // is conditional: skipped entirely when seqno hasn't advanced; only
+      // costs ~one D2H + one H2D of one DeviceLinkState per dirty edge per
+      // update slot (no cost at steady state). D2H is needed because the
+      // device owns the cross-slot delay_line + slot_start_samples that
+      // update_delay_line_kernel writes after the channel kernel — host's
+      // copy is stale post-prepare, so an unconditional H2D would clobber
+      // the cross-slot continuity.
+      if (live_changed && sp.use_device_channel) {
+        // Find this edge's index in the per-destination link-state array.
+        // O(1) via lookup of the link_key against the broker's incoming
+        // order built at prepare(). Tap-0 fields only matter for edges
+        // with has_tdl=1; skip otherwise.
+        std::size_t edge_idx_for_refresh = 0;
+        bool found_edge = false;
+        for (std::size_t kk = 0; kk < inputs.size(); ++kk) {
+          if (inputs[kk].link_key == edge.link_key) {
+            edge_idx_for_refresh = kk;
+            found_edge = true;
+            break;
+          }
+        }
+        if (found_edge && sp.host_link_states[edge_idx_for_refresh].has_tdl) {
+          DeviceLinkState* d_state = sp.device_link_states + edge_idx_for_refresh;
+          DeviceLinkState* h_state = &sp.host_link_states[edge_idx_for_refresh];
+          // 1. D2H to capture device-owned cross-slot state into host copy.
+          check(cudaMemcpyAsync(h_state, d_state, sizeof(DeviceLinkState),
+                                cudaMemcpyDeviceToHost, sp.stream),
+                "tap0-refresh D2H");
+          check(cudaStreamSynchronize(sp.stream), "tap0-refresh D2H sync");
+          // 2. Refresh tap-0 derived fields from the newly snapped live.
+          h_state->live = lms_for_snap.live;  // mirror host live into device state
+          refresh_tap0_from_live(*h_state);
+          // 3. H2D the whole struct back so the next channel kernel reads
+          //    the new derived fields. delay_line + slot_start_samples were
+          //    captured in step 1 and round-trip back unchanged.
+          check(cudaMemcpyAsync(d_state, h_state, sizeof(DeviceLinkState),
+                                cudaMemcpyHostToDevice, sp.stream),
+                "tap0-refresh H2D");
+        }
+      }
       if (sp.use_device_channel) {
         // Device-kernel path: build_steps reads the SHARED source slot for
         // this edge's snr_db power estimator. Edges sharing a source share
