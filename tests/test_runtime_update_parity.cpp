@@ -113,6 +113,53 @@ void write_shadow_path_loss(ocg::ChannelProcessor& proc, float new_db)
   it->second->seqno.fetch_add(1, std::memory_order_release);
 }
 
+void write_shadow_awgn_snr(ocg::ChannelProcessor& proc, float snr_db)
+{
+  auto map = proc.collect_control_links();
+  auto it = map.find("gnb0>ue0");
+  require(it != map.end() && it->second != nullptr, "link found in control map");
+  it->second->shadow.awgn_snr_db = snr_db;
+  it->second->seqno.fetch_add(1, std::memory_order_release);
+}
+
+double mean_power(const std::vector<ocg::IqSample>& samples)
+{
+  double p = 0.0;
+  for (const auto& s : samples) p += static_cast<double>(s.i) * s.i + static_cast<double>(s.q) * s.q;
+  return p / static_cast<double>(samples.size());
+}
+
+// Build a topology whose chain is: tdl pass-through → snr_db AWGN. Used
+// to validate that live.awgn_snr_db actually changes the output noise
+// power at runtime.
+ocg::TopologyConfig make_awgn_topology(ocg::Backend backend)
+{
+  ocg::TopologyConfig cfg;
+  cfg.runtime.backend = backend;
+  cfg.runtime.batch_samples_auto = false;
+  cfg.runtime.batch_samples = 4096;
+  cfg.runtime.queue_samples = 32768;
+  cfg.devices = {
+      {.id = "gnb0", .role = "gnb", .sample_rate_hz = 23040000,
+       .tx_endpoint = "tx0", .rx_endpoint = "rx0"},
+      {.id = "ue0",  .role = "ue",  .sample_rate_hz = 23040000,
+       .tx_endpoint = "tx1", .rx_endpoint = "rx1"}};
+  cfg.links = {{.from = "gnb0", .to = "ue0", .model = "awgn-chain"}};
+
+  ocg::ModelConfig m;
+  m.id = "awgn-chain";
+  m.chain.push_back({.type = ocg::ModelStepType::Tdl,
+                     .params = {},
+                     .taps = {{.delay_samples = 0.0, .gain_db = 0.0, .phase_rad = 0.0}},
+                     .taps_declared = true});
+  ocg::ModelStep awgn;
+  awgn.type = ocg::ModelStepType::Awgn;
+  awgn.params["snr_db"] = 20.0;  // YAML default; runtime-overridable
+  m.chain.push_back(awgn);
+  cfg.models.emplace(m.id, m);
+  return cfg;
+}
+
 }  // namespace
 
 int main()
@@ -169,6 +216,44 @@ int main()
             "slot 2 CPU↔CUDA parity within 1e-3 after second runtime update");
   }
 #endif
+
+  // ── v1-fin-A: AWGN snr_db runtime update changes mean noise power ─────
+  // Drives a unit-power signal through a tdl+awgn chain. Asserts the
+  // measured output power changes by the expected dB ratio when snr_db
+  // is updated at runtime. AWGN is stochastic so this is a power test,
+  // not a bit-exact one; 4096 samples gives a ~5% standard error on the
+  // mean-power estimate, so the assertion tolerates 25% mismatch.
+  {
+    std::vector<ocg::IqSample> unit_input(4096);
+    for (std::size_t i = 0; i < unit_input.size(); ++i) {
+      unit_input[i] = {1.0F, 0.0F};   // signal power = 1.0
+    }
+
+    auto awgn_cfg = make_awgn_topology(ocg::Backend::Cpu);
+    ocg::CpuChannelProcessor awgn_cpu;
+    awgn_cpu.prepare(awgn_cfg);
+    const ocg::ModelConfig& awgn_model = awgn_cfg.models["awgn-chain"];
+
+    // Slot 0: YAML snr_db=20 → noise_power ≈ 0.01 → output power ≈ 1.01.
+    auto out_snr20 = run_slot(awgn_cpu, awgn_model, unit_input);
+    const double p_snr20 = mean_power(out_snr20);
+    require(std::fabs(p_snr20 - 1.01) < 0.25,
+            "AWGN: snr=20 → output power should be ~1.01 (signal + noise)");
+
+    // Slot 1: runtime update snr_db=0 → noise_power = 1.0 → output power ≈ 2.0.
+    write_shadow_awgn_snr(awgn_cpu, 0.0F);
+    auto out_snr0 = run_slot(awgn_cpu, awgn_model, unit_input);
+    const double p_snr0 = mean_power(out_snr0);
+    require(std::fabs(p_snr0 - 2.0) < 0.5,
+            "AWGN: snr=0 → output power should be ~2.0 after runtime update");
+
+    // Slot 2: back up to a quieter snr_db=40 → noise_power ≈ 1e-4 → ≈ 1.0001.
+    write_shadow_awgn_snr(awgn_cpu, 40.0F);
+    auto out_snr40 = run_slot(awgn_cpu, awgn_model, unit_input);
+    const double p_snr40 = mean_power(out_snr40);
+    require(std::fabs(p_snr40 - 1.0) < 0.1,
+            "AWGN: snr=40 → output power should be ~1.0 after runtime update");
+  }
 
   std::cout << "test_runtime_update_parity OK\n";
   return 0;

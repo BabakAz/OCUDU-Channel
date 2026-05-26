@@ -22,8 +22,15 @@ namespace ocg {
 struct MutableParams {
   // Chain-step params (consumed by the per-sample CPU chain or by the
   // superpose_kernel's apply_chain device function on CUDA).
+  //
+  // `awgn_snr_db` is the SNR knob the runtime exposes. Both backends
+  // derive per-component σ from current input power and this value at
+  // execute time: σ = sqrt((Pin / 10^(snr_db/10)) / 2). When a YAML chain
+  // uses an explicit `noise_power`, populate_mutable_params_from_yaml
+  // converts it back to an equivalent snr_db against a reference power
+  // of 1.0 so the runtime control plane has a single knob to write.
   float    path_loss_db        = 0.0F;
-  float    awgn_sigma          = 0.0F;
+  float    awgn_snr_db         = 60.0F;
   float    cfo_hz              = 0.0F;
 
   // Per-edge channel params (consumed by apply_channel_kernel on CUDA or

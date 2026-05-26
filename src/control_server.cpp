@@ -187,7 +187,7 @@ struct ParamSpec {
 constexpr ParamSpec kParamSpecs[] = {
   // name                       min          max          is_int
   {"path_loss_db",              -200.0,       50.0,       false},
-  {"awgn_sigma",                   0.0,       10.0,       false},
+  {"awgn_snr_db",                 -30.0,      120.0,       false},
   {"los_k_db",                   -30.0,       40.0,       false},
   {"cfo_hz",                  -50000.0,    50000.0,       false},
   {"tap0_delay_samples",           0.0,     1023.0,       true },
@@ -209,7 +209,7 @@ const ParamSpec* find_param_spec(const std::string& name)
 double read_shadow(const BrokerLinkControl& ctl, const ParamSpec& spec)
 {
   if (spec.name == std::string_view("path_loss_db"))       return ctl.shadow.path_loss_db;
-  if (spec.name == std::string_view("awgn_sigma"))         return ctl.shadow.awgn_sigma;
+  if (spec.name == std::string_view("awgn_snr_db"))         return ctl.shadow.awgn_snr_db;
   if (spec.name == std::string_view("los_k_db"))           return ctl.shadow.los_k_db;
   if (spec.name == std::string_view("cfo_hz"))             return ctl.shadow.cfo_hz;
   if (spec.name == std::string_view("tap0_delay_samples")) return ctl.shadow.tap0_delay_samples;
@@ -223,7 +223,7 @@ double read_shadow(const BrokerLinkControl& ctl, const ParamSpec& spec)
 bool apply_update(BrokerLinkControl& ctl, const ParamSpec& spec, double value)
 {
   if (spec.name == std::string_view("path_loss_db"))       ctl.shadow.path_loss_db = static_cast<float>(value);
-  else if (spec.name == std::string_view("awgn_sigma"))    ctl.shadow.awgn_sigma   = static_cast<float>(value);
+  else if (spec.name == std::string_view("awgn_snr_db"))    ctl.shadow.awgn_snr_db  = static_cast<float>(value);
   else if (spec.name == std::string_view("los_k_db"))      ctl.shadow.los_k_db     = static_cast<float>(value);
   else if (spec.name == std::string_view("cfo_hz"))        ctl.shadow.cfo_hz       = static_cast<float>(value);
   else if (spec.name == std::string_view("tap0_delay_samples")) ctl.shadow.tap0_delay_samples = static_cast<std::int32_t>(value);

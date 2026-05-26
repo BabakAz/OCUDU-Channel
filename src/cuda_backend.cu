@@ -865,9 +865,14 @@ private:
           break;
         }
         case ModelStepType::Awgn: {
+          // v1-fin-A: AWGN with two source modes (mirrors CPU backend).
+          //   - explicit `noise_power`: absolute, YAML-only, not runtime-
+          //     mutable in v1 (runtime control surface is dB).
+          //   - implicit `snr_db`: sourced from per-link
+          //     `live.awgn_snr_db`, derived per slot against running_power.
           double noise_power = param_or(step, "noise_power", -1.0);
           if (noise_power < 0.0) {
-            const double snr_db = param_or(step, "snr_db", 60.0);
+            const double snr_db = static_cast<double>(ms.live.awgn_snr_db);
             noise_power = running_power / std::pow(10.0, snr_db / 10.0);
           }
           noise_power = std::max(0.0, noise_power);

@@ -83,9 +83,9 @@ int main()
     require(nearly(live.tap0_gain_db, -3.0F), "tap0_gain_db should be -3");
     require(nearly(live.tap0_phase_rad, 0.25F), "tap0_phase_rad should be 0.25");
     require(nearly(live.los_k_db, 9.0F), "los_k_db should be 9");
-    // snr_db=20 against ref_power=1 → noise_power = 0.01 → sigma = sqrt(0.005)
-    require(nearly(live.awgn_sigma, std::sqrt(0.005F), 1e-5F),
-            "awgn_sigma should derive from snr_db + reference_power");
+    // v1-fin-A: AWGN now stored as raw SNR-dB knob; backends derive sigma
+    // per-slot from current input power at execute time.
+    require(nearly(live.awgn_snr_db, 20.0F), "awgn_snr_db should mirror YAML snr_db");
   }
 
   // ── Case 2: empty chain — every field defaults to zero ──────────────────
@@ -97,7 +97,9 @@ int main()
                                                /*sample_rate_hz=*/0);
     require(live.path_loss_db == 0.0F, "empty chain → path_loss_db zero");
     require(live.cfo_hz == 0.0F, "empty chain → cfo_hz zero");
-    require(live.awgn_sigma == 0.0F, "empty chain → awgn_sigma zero");
+    // Empty chain → default snr_db remains the struct default (60 dB,
+    // matches the YAML default in populate_mutable_params_from_yaml).
+    require(live.awgn_snr_db == 60.0F, "empty chain → awgn_snr_db default 60");
     require(live.tap0_delay_samples == 0, "empty chain → tap0_delay_samples zero");
     require(live.tap0_gain_db == 0.0F, "empty chain → tap0_gain_db zero");
     require(live.tap0_phase_rad == 0.0F, "empty chain → tap0_phase_rad zero");

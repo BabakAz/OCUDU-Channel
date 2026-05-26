@@ -152,15 +152,20 @@ void CpuChannelProcessor::apply_chain_to_link(const std::string& link_key_value,
         break;
       }
       case ModelStepType::Awgn: {
-        // AWGN sigma derives from runtime input power vs. YAML snr_db (or an
-        // explicit noise_power). Not yet sourced from `live` in C2a — the
-        // current MutableParams::awgn_sigma representation doesn't capture
-        // the SNR-relative-to-current-power semantics. A later commit will
-        // rework the struct (e.g. awgn_snr_db) and rewire this path.
+        // v1-fin-A: AWGN with two source modes.
+        //   - explicit `noise_power`: an absolute knob, independent of
+        //     input power. Stays YAML-only; not runtime-mutable in v1
+        //     because the runtime control plane works in dB-relative
+        //     terms and absolute power lacks a meaningful unit at the
+        //     control surface.
+        //   - implicit `snr_db`: relative to measured input power.
+        //     Sourced from per-link `live.awgn_snr_db` and IS runtime-
+        //     mutable. σ derives per slot from current power + live SNR.
         double noise_power = param_or(step, "noise_power", -1.0);
         if (noise_power < 0.0) {
-          const double snr_db = param_or(step, "snr_db", 60.0);
-          noise_power = estimate_average_power(current) / std::pow(10.0, snr_db / 10.0);
+          const double snr_db = static_cast<double>(state.live.awgn_snr_db);
+          noise_power = estimate_average_power(current) /
+                        std::pow(10.0, snr_db / 10.0);
         }
         const double sigma = std::sqrt(std::max(0.0, noise_power) / 2.0);
         const std::normal_distribution<float>::param_type params(0.0F, static_cast<float>(sigma));

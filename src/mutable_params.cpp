@@ -39,13 +39,16 @@ MutableParams populate_mutable_params_from_yaml(
         out.cfo_hz = static_cast<float>(param_or(step, "cfo_hz", 0.0));
         break;
       case ModelStepType::Awgn: {
-        double noise_power = param_or(step, "noise_power", -1.0);
-        if (noise_power < 0.0) {
-          const double snr_db = param_or(step, "snr_db", 60.0);
-          noise_power = reference_power / std::pow(10.0, snr_db / 10.0);
+        // v1-fin-A: only the YAML `snr_db` value is mutable from the
+        // control plane. Explicit `noise_power` stays an absolute YAML-
+        // only knob — the runtime exposes dB-relative SNR, not absolute
+        // power. If the chain step uses noise_power, awgn_snr_db keeps
+        // its struct default; the backend's AWGN path detects the
+        // explicit noise_power and bypasses live.
+        (void)reference_power;
+        if (step.params.find("noise_power") == step.params.end()) {
+          out.awgn_snr_db = static_cast<float>(param_or(step, "snr_db", 60.0));
         }
-        noise_power = std::max(0.0, noise_power);
-        out.awgn_sigma = static_cast<float>(std::sqrt(noise_power / 2.0));
         break;
       }
       case ModelStepType::Tdl:
