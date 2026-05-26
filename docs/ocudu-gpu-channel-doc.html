@@ -406,8 +406,9 @@
 
     <!-- DEVICE -->
     <rect x="200" y="50" width="150" height="50" rx="6" fill="#0b101a" stroke="#5db1ff" stroke-width="1.6"/>
-    <text x="275" y="72" fill="#5db1ff" text-anchor="middle" font-size="11">DEVICE</text>
-    <text x="275" y="90" fill="#cdd6e6" text-anchor="middle" font-size="9">GPU kernel / device buffer / H2D · D2H</text>
+    <text x="275" y="70" fill="#5db1ff" text-anchor="middle" font-size="11">DEVICE</text>
+    <text x="275" y="86" fill="#cdd6e6" text-anchor="middle" font-size="9">GPU kernel · device buffer</text>
+    <text x="275" y="97" fill="#cdd6e6" text-anchor="middle" font-size="9">H2D · D2H copy</text>
 
     <!-- DECISION (diamond) -->
     <polygon points="445,50 520,75 445,100 370,75" fill="#0b101a" stroke="#ffb454" stroke-width="1.6"/>
@@ -427,14 +428,16 @@
     <text x="60" y="130" fill="#9aa7bd" font-size="10">Modifiers (apply on top of any class)</text>
 
     <!-- HIGHLIGHT modifier -->
-    <rect x="30" y="140" width="150" height="50" rx="6" fill="rgba(111,208,140,0.40)" stroke="#6fd08c" stroke-width="1.6"/>
-    <text x="105" y="162" fill="#ffb454" text-anchor="middle" font-size="11">HIGHLIGHT</text>
-    <text x="105" y="180" fill="#cdd6e6" text-anchor="middle" font-size="9">call-out slice (translucent fill)</text>
+    <rect x="30" y="140" width="150" height="50" rx="6" fill="rgba(255,180,84,0.18)" stroke="#ffb454" stroke-width="1.6"/>
+    <text x="105" y="160" fill="#ffb454" text-anchor="middle" font-size="11">HIGHLIGHT</text>
+    <text x="105" y="176" fill="#cdd6e6" text-anchor="middle" font-size="9">call-out slice</text>
+    <text x="105" y="187" fill="#cdd6e6" text-anchor="middle" font-size="9">(translucent fill)</text>
 
     <!-- FALLBACK modifier -->
     <rect x="200" y="140" width="150" height="50" rx="6" fill="#0b101a" stroke="#6fd08c" stroke-width="1.6" stroke-dasharray="4 3"/>
-    <text x="275" y="162" fill="#6fd08c" text-anchor="middle" font-size="11">FALLBACK</text>
-    <text x="275" y="180" fill="#cdd6e6" text-anchor="middle" font-size="9">dashed border · on-demand / optional</text>
+    <text x="275" y="160" fill="#6fd08c" text-anchor="middle" font-size="11">FALLBACK</text>
+    <text x="275" y="176" fill="#cdd6e6" text-anchor="middle" font-size="9">dashed border</text>
+    <text x="275" y="187" fill="#cdd6e6" text-anchor="middle" font-size="9">on-demand / optional</text>
 
     <text x="370" y="155" fill="#9aa7bd" font-size="10">Arrows</text>
     <line x1="370" y1="170" x2="430" y2="170" stroke="#5db1ff" stroke-width="1.6" marker-end="url(#leg_b)"/>
@@ -532,12 +535,14 @@
     <text x="170" y="76" fill="#cdd6e6" text-anchor="middle" font-size="11">1 · REQ in</text>
 
     <!-- 2: align+read+pack -->
-    <line x1="230" y1="72" x2="250" y2="72" stroke="#9aa7bd" marker-end="url(#arwmf)"/>
+    <line x1="230" y1="72"  x2="240" y2="72"  stroke="#9aa7bd"/>
+    <line x1="240" y1="72"  x2="240" y2="122" stroke="#9aa7bd"/>
+    <line x1="240" y1="122" x2="250" y2="122" stroke="#9aa7bd" marker-end="url(#arwmf)"/>
     <rect x="250" y="105" width="160" height="34" rx="4" fill="#0b101a" stroke="#6fd08c"/>
     <text x="330" y="126" fill="#6fd08c" text-anchor="middle" font-size="11">2 · align + read + pack</text>
 
     <!-- 3: H2D -->
-    <line x1="410" y1="122" x2="430" y2="122" stroke="#9aa7bd" marker-end="url(#arwmf)"/>
+    <line x1="410" y1="122" x2="430" y2="122" stroke="#9aa7bd"/>
     <line x1="430" y1="122" x2="430" y2="160" stroke="#5db1ff"/>
     <line x1="430" y1="160" x2="450" y2="160" stroke="#5db1ff" marker-end="url(#arwmf)"/>
     <text x="445" y="146" fill="#5db1ff" font-size="9" text-anchor="middle">H2D</text>
@@ -547,7 +552,7 @@
     <text x="560" y="176" fill="#5db1ff" text-anchor="middle" font-size="11">3 · channel · superpose · rx</text>
 
     <!-- 5: D2H -->
-    <line x1="670" y1="170" x2="690" y2="170" stroke="#9aa7bd" marker-end="url(#arwmf)"/>
+    <line x1="670" y1="170" x2="690" y2="170" stroke="#9aa7bd"/>
     <line x1="690" y1="170" x2="690" y2="132" stroke="#5db1ff"/>
     <line x1="690" y1="132" x2="710" y2="132" stroke="#5db1ff" marker-end="url(#arwmf)"/>
     <text x="705" y="148" fill="#5db1ff" font-size="9" text-anchor="middle">D2H</text>
@@ -1216,7 +1221,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
       <rect x="680" y="76" width="60" height="28" fill="#1a2233"/>
     </g>
     <g fill="#6fd08c" text-anchor="middle" font-size="11">
-      <text x="170" y="94" fill="#9aa7bd" font-size="10">(no signal yet)</text>
+      <text x="170" y="94" fill="#9aa7bd" font-size="10">⋯</text>
       <text x="230" y="94" fill="#9aa7bd" font-size="10">⋯</text>
       <text x="290" y="94">a₀</text>
       <text x="350" y="94">a₁</text>
@@ -1251,7 +1256,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
       <rect x="680" y="148" width="60" height="28" fill="#1a2233"/>
     </g>
     <g fill="#6fd08c" text-anchor="middle" font-size="11">
-      <text x="170" y="166" fill="#9aa7bd" font-size="10">(no signal yet)</text>
+      <text x="170" y="166" fill="#9aa7bd" font-size="10">⋯</text>
       <text x="230" y="166" fill="#9aa7bd" font-size="10">⋯</text>
       <text x="290" y="166" fill="#9aa7bd" font-size="10">⋯</text>
       <text x="350" y="166" fill="#9aa7bd" font-size="10">⋯</text>
@@ -1889,8 +1894,8 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
     <text x="820" y="98" fill="#9aa7bd" font-size="10" text-anchor="middle">false · FALLBACK</text>
 
     <!-- Branch arrows from gate -->
-    <line x1="300" y1="72" x2="180" y2="116" stroke="#6fd08c" stroke-width="1.6" marker-end="url(#ars)"/>
-    <line x1="700" y1="72" x2="820" y2="116" stroke="#9aa7bd" stroke-width="1.6" marker-end="url(#ars)"/>
+    <line x1="300" y1="72" x2="180" y2="120" stroke="#6fd08c" stroke-width="1.6" marker-end="url(#ars)"/>
+    <line x1="700" y1="72" x2="820" y2="120" stroke="#9aa7bd" stroke-width="1.6" marker-end="url(#ars)"/>
 
     <!-- ===== LEFT COLUMN: device-default path (Phase 2 D3 + D4) ===== -->
     <!-- Lane border uses neutral grey since it groups boxes of multiple classes (HOST pack + DEVICE kernel). -->
@@ -1908,11 +1913,12 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
 
     <line x1="250" y1="200" x2="250" y2="220" stroke="#9aa7bd" marker-end="url(#ars)"/>
 
-    <rect x="60" y="222" width="380" height="44" rx="4" fill="#0b101a" stroke="#5db1ff" stroke-width="1.6"/>
-    <text x="250" y="240" fill="#5db1ff" text-anchor="middle" font-size="11">apply_channel_kernel</text>
-    <text x="250" y="256" fill="#cdd6e6" text-anchor="middle" font-size="9">multi-tap polyphase (§12.3 Y) · Jakes + Rician (§10) · src_index read (§12.2 X)</text>
+    <rect x="60" y="222" width="380" height="56" rx="4" fill="#0b101a" stroke="#5db1ff" stroke-width="1.6"/>
+    <text x="250" y="238" fill="#5db1ff" text-anchor="middle" font-size="11">apply_channel_kernel</text>
+    <text x="250" y="254" fill="#cdd6e6" text-anchor="middle" font-size="9">multi-tap polyphase (§12.3 Y) · Jakes + Rician (§10)</text>
+    <text x="250" y="268" fill="#cdd6e6" text-anchor="middle" font-size="9">src_index read (§12.2 X)</text>
 
-    <line x1="250" y1="266" x2="250" y2="284" stroke="#9aa7bd" marker-end="url(#ars)"/>
+    <line x1="250" y1="278" x2="250" y2="284" stroke="#9aa7bd" marker-end="url(#ars)"/>
 
     <rect x="60" y="286" width="380" height="40" rx="4" fill="#0b101a" stroke="#5db1ff" stroke-width="1.6"/>
     <text x="250" y="304" fill="#5db1ff" text-anchor="middle" font-size="10">update_delay_line_kernel</text>
@@ -2040,9 +2046,10 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
     <!-- Kernel reads -->
     <rect x="320" y="50" width="320" height="100" rx="6" fill="#0b101a" stroke="#5db1ff"/>
     <text x="480" y="74" fill="#5db1ff" text-anchor="middle" font-size="11">apply_channel_kernel · READ ONLY</text>
-    <text x="480" y="98" fill="#cdd6e6" text-anchor="middle" font-size="10">tap_* · fading_* · polyphase · alpha · phi · los_* · src_index</text>
-    <text x="480" y="118" fill="#9aa7bd" text-anchor="middle" font-size="9">never mutated after prepare</text>
-    <text x="480" y="138" fill="#9aa7bd" text-anchor="middle" font-size="9">→ writes device_staged only</text>
+    <text x="480" y="92" fill="#cdd6e6" text-anchor="middle" font-size="10">tap_* · fading_* · polyphase · alpha · phi</text>
+    <text x="480" y="106" fill="#cdd6e6" text-anchor="middle" font-size="10">los_* · src_index</text>
+    <text x="480" y="124" fill="#9aa7bd" text-anchor="middle" font-size="9">never mutated after prepare</text>
+    <text x="480" y="140" fill="#9aa7bd" text-anchor="middle" font-size="9">→ writes device_staged only</text>
 
     <line x1="640" y1="100" x2="680" y2="100" stroke="#5db1ff" marker-end="url(#arxn)"/>
 
@@ -2054,9 +2061,9 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
     <text x="820" y="128" fill="#9aa7bd" text-anchor="middle" font-size="9">read again next slot</text>
 
     <!-- Loop arrow -->
-    <line x1="820" y1="158" x2="820" y2="180" stroke="#9aa7bd"/>
+    <line x1="820" y1="150" x2="820" y2="180" stroke="#9aa7bd"/>
     <line x1="820" y1="180" x2="480" y2="180" stroke="#9aa7bd"/>
-    <line x1="480" y1="180" x2="480" y2="158" stroke="#9aa7bd" marker-end="url(#arxn)"/>
+    <line x1="480" y1="180" x2="480" y2="150" stroke="#9aa7bd" marker-end="url(#arxn)"/>
     <text x="650" y="194" fill="#9aa7bd" font-size="9" text-anchor="middle">next slot</text>
   </svg>
   <figcaption>Diagram X — <code>DeviceLinkState</code> lifecycle. Built once
@@ -2123,7 +2130,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
       <rect x="380" y="50" width="40" height="70" fill="rgba(93,177,255,0.45)" stroke="#5db1ff"/>
       <text x="400" y="78" fill="#6fd08c" text-anchor="middle" font-size="9">h[4]</text>
       <rect x="480" y="50" width="40" height="70" fill="rgba(93,177,255,0.45)" stroke="#5db1ff"/>
-      <text x="500" y="78" fill="#6fd08c" text-anchor="middle" font-size="9">h[3] · peak</text>
+      <text x="500" y="78" fill="#6fd08c" text-anchor="middle" font-size="9">h[3]</text>
       <rect x="580" y="65" width="40" height="55" fill="rgba(93,177,255,0.55)" stroke="#5db1ff"/>
       <text x="600" y="93"  fill="#5db1ff" text-anchor="middle" font-size="9">h[2]</text>
       <rect x="680" y="80" width="40" height="40" fill="rgba(93,177,255,0.40)" stroke="#5db1ff"/>
@@ -2204,7 +2211,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
 
     <rect x="510" y="116" width="110" height="34" rx="4" fill="#181f2e" stroke="#ffb454" stroke-width="1.6"/>
     <text x="565" y="132" fill="#ffb454" text-anchor="middle" font-size="10">delay_line[0..31]</text>
-    <text x="565" y="144" fill="#9aa7bd" text-anchor="middle" font-size="9">persistent across slots</text>
+    <text x="565" y="144" fill="#9aa7bd" text-anchor="middle" font-size="9">kept across slots</text>
 
     <path d="M 620 130 Q 660 130 660 166" fill="none" stroke="#ffb454" stroke-width="1.6" marker-end="url(#arz)"/>
 
@@ -2409,7 +2416,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
       <text x="154" y="56">s0</text>
       <text x="182" y="56">s1</text>
       <text x="210" y="56">s2</text>
-      <text x="238" y="56" fill="#ffb454">s_idx</text>
+      <text x="238" y="56" fill="#ffb454" font-size="9">s_idx</text>
       <text x="266" y="56">s4</text>
       <text x="294" y="56">s5</text>
     </g>
@@ -2432,7 +2439,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
       <text x="154" y="86">s0</text>
       <text x="182" y="86">s1</text>
       <text x="210" y="86">s2</text>
-      <text x="238" y="86" fill="#ffb454">s_idx</text>
+      <text x="238" y="86" fill="#ffb454" font-size="9">s_idx</text>
       <text x="266" y="86">s4</text>
       <text x="294" y="86">s5</text>
     </g>
@@ -2459,7 +2466,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
       <text x="154" y="132">s0</text>
       <text x="182" y="132">s1</text>
       <text x="210" y="132">s2</text>
-      <text x="238" y="132" fill="#ffb454">s_idx</text>
+      <text x="238" y="132" fill="#ffb454" font-size="9">s_idx</text>
       <text x="266" y="132">s4</text>
       <text x="294" y="132">s5</text>
     </g>
@@ -2491,8 +2498,9 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
       <line x1="254" y1="128" x2="536" y2="150"/>
     </g>
     <rect x="540" y="268" width="430" height="34" rx="4" fill="#0b101a" stroke="#5db1ff"/>
-    <text x="755" y="289" fill="#5db1ff" text-anchor="middle">device_output[0 … 23039] — node's RX signal (all threads' writes)</text>
-    <line x1="755" y1="250" x2="755" y2="260" stroke="#5db1ff" marker-end="url(#ar2)"/>
+    <text x="755" y="284" fill="#5db1ff" text-anchor="middle" font-size="11">device_output[0 … 23039]</text>
+    <text x="755" y="297" fill="#9aa7bd" text-anchor="middle" font-size="10">node's RX signal · all threads' writes</text>
+    <line x1="755" y1="250" x2="755" y2="268" stroke="#5db1ff" marker-end="url(#ar2)"/>
     <text x="20" y="300" fill="#cdd6e6">desired, interference, and crosstalk are the same operation:</text>
     <text x="20" y="320" fill="#cdd6e6">every term of dst[idx] is one edge arriving at the node.</text>
   </svg>
@@ -2873,13 +2881,14 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
     <line x1="200" y1="82" x2="260" y2="82" stroke="#6fd08c" stroke-width="1.6" marker-end="url(#arr_on)"/>
 
     <rect x="260" y="60" width="240" height="44" rx="6" fill="#0b101a" stroke="#5db1ff" stroke-width="2"/>
-    <text x="380" y="80" fill="#5db1ff" text-anchor="middle" font-size="11">chrono::steady_clock</text>
-    <text x="380" y="96" fill="#9aa7bd" text-anchor="middle" font-size="9">per-stage CPU µs (align / read / pack / throttle)</text>
+    <text x="380" y="78" fill="#5db1ff" text-anchor="middle" font-size="11">chrono::steady_clock</text>
+    <text x="380" y="91" fill="#9aa7bd" text-anchor="middle" font-size="9">per-stage CPU µs</text>
+    <text x="380" y="102" fill="#9aa7bd" text-anchor="middle" font-size="9">align / read / pack / throttle</text>
 
     <!-- Row 2: GPU work (DEVICE class) -->
     <rect x="40" y="118" width="160" height="44" rx="6" fill="#0b101a" stroke="#5db1ff" stroke-width="1.6"/>
     <text x="120" y="138" fill="#5db1ff" text-anchor="middle" font-size="11">GPU kernels</text>
-    <text x="120" y="154" fill="#9aa7bd" text-anchor="middle" font-size="9">apply_channel · superpose · rx</text>
+    <text x="120" y="154" fill="#9aa7bd" text-anchor="middle" font-size="9">channel · superpose · rx</text>
 
     <line x1="200" y1="140" x2="260" y2="140" stroke="#5db1ff" stroke-width="1.6" marker-end="url(#arr_on_b)"/>
 
