@@ -301,7 +301,7 @@
   <p>ocudu-gpu-channel is a real-time, in-the-loop channel emulator that sits between live
   SDR stacks (OCUDU runtime, srsRAN gNB/UE) over ZMQ and applies CUDA channel models inside
   the 5G&nbsp;NR slot deadline. This doc is the implementation reference — it assumes you
-  have already read the <a href="../README.md"><code>README</code></a> for positioning and
+  have already read the <a href="https://github.com/zhouyou-gu/ocudu-gpu-channel#readme"><code>README</code></a> for positioning and
   quick-start.</p>
   <p class="note"><b>Slot length and SCS.</b> The slot deadline depends on the subcarrier
   spacing: <b>1&nbsp;ms at 15&nbsp;kHz SCS</b>, <b>500&nbsp;µs at 30&nbsp;kHz SCS</b> (the
@@ -2764,7 +2764,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   <code>ocudu-multi-ue-smoke.sh</code> (1 gNB + 2 UEs, Milestone B),
   <code>ocudu-multi-gnb-smoke.sh</code> (2 gNBs + 2 UEs with ICI,
   Milestone C). Detailed runbook at
-  <a href="ocudu-interop.md"><code>docs/ocudu-interop.md</code></a>.</p>
+  <a href="https://github.com/zhouyou-gu/ocudu-gpu-channel/blob/main/docs/ocudu-interop.md"><code>docs/ocudu-interop.md</code></a>.</p>
 
   <h3 id="test-architecture">17.4 Test architecture — what each layer guards</h3>
   <figure>
@@ -2814,7 +2814,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
         deadlines. Check the kernel timings first (<code>event=gpu_timings</code>);
         the GPU is rarely the bottleneck.</li>
     <li><b>Distributed IQ across machines</b> over Wi-Fi or VPN is not viable — see
-        <a href="distributed.md"><code>docs/distributed.md</code></a>. Co-locate the
+        <a href="https://github.com/zhouyou-gu/ocudu-gpu-channel/blob/main/docs/distributed.md"><code>docs/distributed.md</code></a>. Co-locate the
         broker and radios on a wired LAN, ideally the same host.</li>
   </ul>
 
@@ -3868,7 +3868,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   <h3>Planned — topology shapes (lower priority)</h3>
   <ul class="tight">
     <li><b>Distributed IQ across hosts.</b> Today the broker and radios
-        must be co-located (<a href="distributed.md">docs/distributed.md</a>).
+        must be co-located (<a href="https://github.com/zhouyou-gu/ocudu-gpu-channel/blob/main/docs/distributed.md">docs/distributed.md</a>).
         A second broker hop over RDMA-class networking would let the
         emulator scale across nodes. Out of scope for now — the per-link
         latency budget on a wired LAN is already tight; over IP fabric

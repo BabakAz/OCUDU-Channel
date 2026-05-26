@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Performance sweep: bench every example topology under both CPU and CUDA
 # backends, collect per-phase latency, throughput, and memory footprint into a
-# single JSON file. Populates the numbers behind docs/ocudu-gpu-channel-doc.html
+# single JSON file. Populates the numbers behind docs/index.html
 # section "Performance — measured boundaries".
 #
 # Usage: scripts/remote/perf-sweep.sh
