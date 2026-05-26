@@ -30,6 +30,7 @@ add_library(ocudu_gpu_channel_lib
   src/backend.cpp
   src/broker.cpp
   src/config.cpp
+  src/control_server.cpp
   src/cpu_backend.cpp
   src/latency.cpp
   src/mutable_params.cpp
@@ -84,6 +85,10 @@ if(OCUDU_GPU_CHANNEL_BUILD_TESTS)
   add_executable(test_mutable_params tests/test_mutable_params.cpp)
   target_link_libraries(test_mutable_params PRIVATE ocudu_gpu_channel_lib)
   add_test(NAME mutable_params COMMAND test_mutable_params)
+
+  add_executable(test_control_server tests/test_control_server.cpp)
+  target_link_libraries(test_control_server PRIVATE ocudu_gpu_channel_lib)
+  add_test(NAME control_server COMMAND test_control_server)
 
   add_executable(test_processing tests/test_processing.cpp)
   target_link_libraries(test_processing PRIVATE ocudu_gpu_channel_lib)
