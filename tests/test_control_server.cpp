@@ -196,6 +196,110 @@ int main()
     require(contains(log_lines[0], "seqno=1"), "first update reports seqno=1");
   }
 
+  // ── v2.0-F2: profile_swap message type ──────────────────────────────────
+
+  // Case 14: valid profile_swap (2 taps, no fading) → accepted, shadow populated
+  {
+    const std::string reply = server.handle_message(R"({
+      "type":"profile_swap",
+      "link_id":"ue0-gnb0",
+      "taps":[
+        {"delay_samples":0.0,"gain_db":-3.0,"phase_rad":0.0,"is_los":true,"los_k_db":9.0,"los_angle_rad":0.0},
+        {"delay_samples":2.5,"gain_db":-6.0,"phase_rad":1.0}
+      ]
+    })");
+    require(contains(reply, "\"ok\":true"), "valid profile_swap should be accepted");
+    require(ctl_a->profile_pending, "profile_pending should be set");
+    require(ctl_a->shadow_profile.n_taps == 2, "shadow_profile.n_taps should be 2");
+    require(nearly(static_cast<float>(ctl_a->shadow_profile.taps[0].gain_db), -3.0F),
+            "shadow_profile.taps[0].gain_db should be -3.0");
+    require(nearly(static_cast<float>(ctl_a->shadow_profile.taps[1].delay_samples), 2.5F),
+            "shadow_profile.taps[1].delay_samples should be 2.5");
+    require(ctl_a->shadow_profile.taps[0].is_los, "tap 0 should be LOS");
+    require(!ctl_a->shadow_profile.fading_enabled, "fading default off when omitted");
+  }
+
+  // Case 15: valid profile_swap with fading sub-config
+  {
+    const std::string reply = server.handle_message(R"({
+      "type":"profile_swap",
+      "link_id":"ue1-gnb0",
+      "taps":[{"delay_samples":0.0,"gain_db":0.0}],
+      "fading":{"enabled":true,"f_d_max_hz":350.0,"spectrum":"jakes","grid_us":100.0}
+    })");
+    require(contains(reply, "\"ok\":true"), "profile_swap with fading should be accepted");
+    require(ctl_b->shadow_profile.fading_enabled, "fading_enabled should be true");
+    require(nearly(ctl_b->shadow_profile.fading_f_d_max_hz, 350.0F),
+            "fading_f_d_max_hz should be 350");
+  }
+
+  // Case 16: > kDeviceMaxTaps taps → rejected
+  {
+    std::string req = R"({"type":"profile_swap","link_id":"ue0-gnb0","taps":[)";
+    for (int i = 0; i < ocg::kDeviceMaxTaps + 1; ++i) {
+      if (i) req += ",";
+      req += R"({"delay_samples":0,"gain_db":0})";
+    }
+    req += "]}";
+    const std::string reply = server.handle_message(req);
+    require(contains(reply, "\"ok\":false"), ">max-taps should be rejected");
+    require(contains(reply, "exceeds kDeviceMaxTaps"), "error names the limit");
+  }
+
+  // Case 17: empty taps array → rejected
+  {
+    const std::string reply = server.handle_message(
+        R"({"type":"profile_swap","link_id":"ue0-gnb0","taps":[]})");
+    require(contains(reply, "\"ok\":false"), "empty taps should be rejected");
+    require(contains(reply, "must not be empty"), "error names the constraint");
+  }
+
+  // Case 18: profile_swap missing 'taps' → rejected
+  {
+    const std::string reply = server.handle_message(
+        R"({"type":"profile_swap","link_id":"ue0-gnb0"})");
+    require(contains(reply, "\"ok\":false"), "missing taps should be rejected");
+    require(contains(reply, "missing or non-array"), "error names the issue");
+  }
+
+  // Case 19: profile_swap with non-jakes spectrum → rejected
+  {
+    const std::string reply = server.handle_message(R"({
+      "type":"profile_swap","link_id":"ue0-gnb0",
+      "taps":[{"delay_samples":0,"gain_db":0}],
+      "fading":{"spectrum":"flat"}
+    })");
+    require(contains(reply, "\"ok\":false"), "non-jakes spectrum should be rejected");
+    require(contains(reply, "jakes"), "error names the supported spectrum");
+  }
+
+  // Case 20: scalar update with explicit "type":"scalar" works (back-compat)
+  {
+    const std::string reply = server.handle_message(
+        R"({"type":"scalar","link_id":"ue0-gnb0","param":"cfo_hz","value":-150.0})");
+    require(contains(reply, "\"ok\":true"), "explicit type=scalar should work");
+    require(nearly(ctl_a->shadow.cfo_hz, -150.0F), "shadow.cfo_hz should update");
+  }
+
+  // Case 21: unknown type → rejected
+  {
+    const std::string reply = server.handle_message(
+        R"({"type":"future","link_id":"ue0-gnb0"})");
+    require(contains(reply, "\"ok\":false"), "unknown type should be rejected");
+    require(contains(reply, "unknown message type"), "error names the dispatch failure");
+  }
+
+  // Case 22: counters after the v2 cases
+  {
+    const auto s = server.stats();
+    // 13 priors + 8 new (14-21) = 21
+    require(s.msgs_received == 19, "msgs_received tracks all v2 cases");
+    // Successes: 1,2,3,4,5 (=5) + 14,15,20 (=3) = 8
+    require(s.updates_applied == 8, "updates_applied should be 8");
+    // Rejections: 6,7,8,9,10,11 (=6) + 16,17,18,19,21 (=5) = 11
+    require(s.updates_rejected == 11, "updates_rejected should be 11");
+  }
+
   // ── C3b: full end-to-end over real ZMQ REQ ↔ REP on a localhost TCP port
   // Uses a port the OS picks via tcp://127.0.0.1:0 isn't supported on bind
   // for the binding side in older zmq builds, so pick a high port unlikely

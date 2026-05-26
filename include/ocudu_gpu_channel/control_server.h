@@ -85,6 +85,10 @@ public:
   // loop calls this for every received frame; tests can call it directly to
   // exercise validation + shadow updates without spinning up ZMQ. Returns
   // the JSON REP body that the server would send back to the client.
+  //
+  // v2: dispatches on the `type` field of the JSON envelope. Defaults to
+  // "scalar" for v1 back-compat. Currently recognised types: "scalar",
+  // "profile_swap".
   std::string handle_message(const std::string& request_body);
 
 private:
