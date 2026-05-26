@@ -1,6 +1,6 @@
 # Plan — runtime-mutable channel parameters
 
-Status: **draft** · Phase target: **Phase 3** (after Phase 2 D7 ships) · Effort estimate: **~5–7 focused days for v1 (scalar params); v2 + v3 are separate increments** · Risk: **medium** (concurrency model + CPU↔CUDA parity contract changes)
+Status: **v1 landed (C1–C5)** · Phase target: **Phase 3** · Doc-update step **C6 landed** · v1 effort actual: **~1 focused day across 7 commits** · Risk: held to **low** (every commit kept tests green; CPU↔CUDA parity preserved by construction)
 
 ## Goal in one sentence
 
