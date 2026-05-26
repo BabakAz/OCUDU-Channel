@@ -25,6 +25,7 @@
 #include "ocudu_gpu_channel/config.h"
 #include "ocudu_gpu_channel/delay.h"
 #include "ocudu_gpu_channel/iq.h"
+#include "ocudu_gpu_channel/mutable_params.h"
 #include <cstdint>
 
 namespace ocg {
@@ -101,6 +102,15 @@ struct DeviceLinkState {
   // ---- Cross-slot state (kernel reads + writes each serve) --------------
   IqSample delay_line[kDeviceMaxDelayLine];
   unsigned long long slot_start_samples;
+
+  // ---- Runtime-mutable scalar params (Phase 3 v1) -----------------------
+  // Populated at prepare() from YAML; in Phase 3 C2+ this field is also the
+  // destination of a snap-from-shadow step that runs at slot boundaries,
+  // before the H2D, when the ZMQ control plane has pushed an update. The
+  // kernel does NOT yet read from `live` in C1 — that wire-in lands in C2.
+  // Mirrors LinkModelState::live (CPU fallback) and LinkState::live (CPU
+  // backend) so both code paths converge on one source of truth per link.
+  MutableParams live;
 };
 
 // Populate a DeviceLinkState from the matching host-side ModelStep + the

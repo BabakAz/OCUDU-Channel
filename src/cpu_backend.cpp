@@ -72,6 +72,13 @@ CpuChannelProcessor::LinkState& CpuChannelProcessor::ensure_link_state(const std
         prepare_tdl_step(state.steps[i], model.chain[i], fading_seed);
       }
     }
+    // Phase 3 v1: populate runtime-mutable params from YAML. Not yet read by
+    // the chain execution path -- that wire-in lands in C2. Reference power
+    // is unknown at prepare time (depends on actual input); for the initial
+    // sigma seed pass 0 so it falls back to the SNR-based formula at execute
+    // time (matching the existing chain-step behaviour).
+    state.live = populate_mutable_params_from_yaml(model, /*reference_power=*/0.0,
+                                                   /*sample_rate_hz=*/0);
   }
   return state;
 }

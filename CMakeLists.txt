@@ -32,6 +32,7 @@ add_library(ocudu_gpu_channel_lib
   src/config.cpp
   src/cpu_backend.cpp
   src/latency.cpp
+  src/mutable_params.cpp
   src/processing.cpp
   src/ring.cpp
 )
@@ -79,6 +80,10 @@ if(OCUDU_GPU_CHANNEL_BUILD_TESTS)
   add_executable(test_config tests/test_config.cpp)
   target_link_libraries(test_config PRIVATE ocudu_gpu_channel_lib)
   add_test(NAME config COMMAND test_config)
+
+  add_executable(test_mutable_params tests/test_mutable_params.cpp)
+  target_link_libraries(test_mutable_params PRIVATE ocudu_gpu_channel_lib)
+  add_test(NAME mutable_params COMMAND test_mutable_params)
 
   add_executable(test_processing tests/test_processing.cpp)
   target_link_libraries(test_processing PRIVATE ocudu_gpu_channel_lib)

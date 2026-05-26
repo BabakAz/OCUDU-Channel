@@ -3,6 +3,7 @@
 #include "ocudu_gpu_channel/config.h"
 #include "ocudu_gpu_channel/delay.h"
 #include "ocudu_gpu_channel/iq.h"
+#include "ocudu_gpu_channel/mutable_params.h"
 #include "ocudu_gpu_channel/processing.h"
 #include <array>
 #include <random>
@@ -65,6 +66,11 @@ private:
     IqBuffer scratch_a;
     IqBuffer scratch_b;
     std::vector<StepState> steps;
+    // Runtime-mutable scalar params (Phase 3 v1). Populated from YAML at
+    // prepare(); the chain-execution path will read from `live` in C2 (not
+    // wired in C1). Mirrors DeviceLinkState::live so both backends converge
+    // on one source of truth per link.
+    MutableParams live;
   };
 
   LinkState& ensure_link_state(const std::string& link_key,

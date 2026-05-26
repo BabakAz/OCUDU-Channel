@@ -1,6 +1,7 @@
 #include "ocudu_gpu_channel/cuda_backend.h"
 #include "ocudu_gpu_channel/delay.h"
 #include "ocudu_gpu_channel/device_channel.h"
+#include "ocudu_gpu_channel/mutable_params.h"
 #include "ocudu_gpu_channel/processing.h"
 #include <algorithm>
 #include <chrono>
@@ -76,6 +77,11 @@ struct LinkModelState {
   // case. The seed is derived from the link key + step index so the CPU and
   // CUDA backends draw the same Jakes sub-ray angles.
   TdlFadingState tdl_fading;
+  // Runtime-mutable scalar params (Phase 3 v1). Populated from YAML at
+  // prepare(); mirrors DeviceLinkState::live so the host-fallback path
+  // observes the same initial state as the device path. C2 adds the snap-
+  // from-shadow step that updates this at slot boundaries.
+  MutableParams live;
 };
 
 void init_model_state(LinkModelState& state, std::size_t steps, const std::string& seed_prefix)
@@ -379,6 +385,10 @@ public:
       auto& slot = link_slots_[link_key(link)];
       init_model_state(slot.model, model->chain.size(), link_key(link));
       configure_leading_propagation(slot.model, *model, link_key(link));
+      // Phase 3 v1: populate runtime-mutable params from YAML. Not yet read
+      // by the chain execution path -- C2 wires the snap-from-shadow step.
+      slot.model.live = populate_mutable_params_from_yaml(
+          *model, /*reference_power=*/0.0, destination->sample_rate_hz);
     }
 
     // Per-destination superposition state: one entry per node that is the
@@ -527,6 +537,10 @@ public:
           sp.host_link_states[k_idx].src_index = src_idx;
           sp.host_link_states[k_idx].has_tdl = 0;
         }
+        // Phase 3 v1: mirror the host-side initial mutable state into this
+        // edge's DeviceLinkState so the device path's `live` matches the
+        // host fallback's `live` on slot 0.
+        sp.host_link_states[k_idx].live = lms.live;
         ++k_idx;
       }
       sp.use_device_channel = all_leading_tdl;
