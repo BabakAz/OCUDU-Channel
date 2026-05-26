@@ -399,15 +399,17 @@ void refresh_tap0_from_live(DeviceLinkState& s)
     // kernel. Nothing to refresh; keep live in sync as a no-op.
     return;
   }
-  // tap0_delay_samples is integer in MutableParams (multi-tap profile
-  // swap and fractional-on-the-fly are v2). Integer-delay polyphase
-  // collapses to a unit impulse at the center index (3) of the 8-tap
-  // windowed sinc — same as build_device_link_state's frac=0 result.
-  s.tap_delay_int[0] = static_cast<int>(s.live.tap0_delay_samples);
-  s.tap_frac[0]      = 0.0F;
-  for (int i = 0; i < kTdlFracFilterTaps; ++i) {
-    s.tap_polyphase[0][i] = (i == 3) ? 1.0F : 0.0F;
-  }
+  // tap0_delay_samples is FLOAT in MutableParams (v1-fin-C update — was
+  // int, but YAMLs like TR 38.901 TDL-A use fractional delays such as
+  // τ=2.5). Split into integer + fractional parts and recompute the
+  // 8-tap windowed-sinc polyphase via the same helper apply_tdl_step
+  // uses at prepare time, keeping CPU↔CUDA parity intact.
+  const double delay   = static_cast<double>(s.live.tap0_delay_samples);
+  const double tau_int = std::floor(delay);
+  s.tap_delay_int[0] = static_cast<int>(tau_int);
+  s.tap_frac[0]      = static_cast<float>(delay - tau_int);
+  compute_windowed_sinc_taps(s.tap_frac[0], s.tap_polyphase[0]);
+
   s.tap_gain_amp[0] = static_cast<float>(std::pow(10.0, s.live.tap0_gain_db / 20.0));
   s.tap_cos_phi[0]  = static_cast<float>(std::cos(s.live.tap0_phase_rad));
   s.tap_sin_phi[0]  = static_cast<float>(std::sin(s.live.tap0_phase_rad));

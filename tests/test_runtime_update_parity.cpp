@@ -122,6 +122,15 @@ void write_shadow_awgn_snr(ocg::ChannelProcessor& proc, float snr_db)
   it->second->seqno.fetch_add(1, std::memory_order_release);
 }
 
+void write_shadow_tap0_gain(ocg::ChannelProcessor& proc, float gain_db)
+{
+  auto map = proc.collect_control_links();
+  auto it = map.find("gnb0>ue0");
+  require(it != map.end() && it->second != nullptr, "link found in control map");
+  it->second->shadow.tap0_gain_db = gain_db;
+  it->second->seqno.fetch_add(1, std::memory_order_release);
+}
+
 double mean_power(const std::vector<ocg::IqSample>& samples)
 {
   double p = 0.0;
@@ -216,6 +225,54 @@ int main()
             "slot 2 CPU↔CUDA parity within 1e-3 after second runtime update");
   }
 #endif
+
+  // ── v1-fin-C: tap0_gain_db runtime update changes amplitude (CPU) ─────
+  // Drives a 1+0j signal through a single-tap tdl (no follow-on chain
+  // steps so the gain shows up directly). Mutates tap0_gain_db at runtime
+  // and asserts amplitude scales.
+  {
+    ocg::TopologyConfig tap_cfg;
+    tap_cfg.runtime.backend = ocg::Backend::Cpu;
+    tap_cfg.runtime.batch_samples_auto = false;
+    tap_cfg.runtime.batch_samples = 4;
+    tap_cfg.runtime.queue_samples = 32;
+    tap_cfg.devices = {
+        {.id = "gnb0", .role = "gnb", .sample_rate_hz = 23040000,
+         .tx_endpoint = "tx0", .rx_endpoint = "rx0"},
+        {.id = "ue0",  .role = "ue",  .sample_rate_hz = 23040000,
+         .tx_endpoint = "tx1", .rx_endpoint = "rx1"}};
+    tap_cfg.links = {{.from = "gnb0", .to = "ue0", .model = "tap-only"}};
+    ocg::ModelConfig m;
+    m.id = "tap-only";
+    m.chain.push_back({.type = ocg::ModelStepType::Tdl,
+                       .params = {},
+                       .taps = {{.delay_samples = 0.0, .gain_db = 0.0, .phase_rad = 0.0}},
+                       .taps_declared = true});
+    tap_cfg.models.emplace(m.id, m);
+
+    ocg::CpuChannelProcessor tap_cpu;
+    tap_cpu.prepare(tap_cfg);
+    const ocg::ModelConfig& tap_model = tap_cfg.models["tap-only"];
+
+    const std::vector<ocg::IqSample> unit = {{1.0F, 0.0F}, {1.0F, 0.0F},
+                                              {1.0F, 0.0F}, {1.0F, 0.0F}};
+
+    // Slot 0: YAML gain=0 dB → output amplitude 1.0.
+    auto t0 = run_slot(tap_cpu, tap_model, unit);
+    require(near_float(t0[1].i, 1.0F), "tap0: gain=0 dB → amplitude 1.0");
+
+    // Runtime update: tap0_gain_db = 6 dB → ~2x amplitude.
+    write_shadow_tap0_gain(tap_cpu, 6.020599913F);
+    auto t1 = run_slot(tap_cpu, tap_model, unit);
+    require(near_float(t1[1].i, 2.0F, 1e-3F),
+            "tap0: runtime gain=+6 dB → amplitude ~2.0");
+
+    // Runtime update: tap0_gain_db = -6 dB → ~0.5x amplitude.
+    write_shadow_tap0_gain(tap_cpu, -6.020599913F);
+    auto t2 = run_slot(tap_cpu, tap_model, unit);
+    require(near_float(t2[1].i, 0.5F, 1e-3F),
+            "tap0: runtime gain=-6 dB → amplitude ~0.5");
+  }
 
   // ── v1-fin-A: AWGN snr_db runtime update changes mean noise power ─────
   // Drives a unit-power signal through a tdl+awgn chain. Asserts the

@@ -190,7 +190,7 @@ constexpr ParamSpec kParamSpecs[] = {
   {"awgn_snr_db",                 -30.0,      120.0,       false},
   {"los_k_db",                   -30.0,       40.0,       false},
   {"cfo_hz",                  -50000.0,    50000.0,       false},
-  {"tap0_delay_samples",           0.0,     1023.0,       true },
+  {"tap0_delay_samples",           0.0,     1023.0,       false},
   {"tap0_gain_db",              -100.0,       20.0,       false},
   {"tap0_phase_rad",             -3.1415926535897932,
                                    3.1415926535897932,    false},
@@ -226,7 +226,7 @@ bool apply_update(BrokerLinkControl& ctl, const ParamSpec& spec, double value)
   else if (spec.name == std::string_view("awgn_snr_db"))    ctl.shadow.awgn_snr_db  = static_cast<float>(value);
   else if (spec.name == std::string_view("los_k_db"))      ctl.shadow.los_k_db     = static_cast<float>(value);
   else if (spec.name == std::string_view("cfo_hz"))        ctl.shadow.cfo_hz       = static_cast<float>(value);
-  else if (spec.name == std::string_view("tap0_delay_samples")) ctl.shadow.tap0_delay_samples = static_cast<std::int32_t>(value);
+  else if (spec.name == std::string_view("tap0_delay_samples")) ctl.shadow.tap0_delay_samples = static_cast<float>(value);
   else if (spec.name == std::string_view("tap0_gain_db"))  ctl.shadow.tap0_gain_db = static_cast<float>(value);
   else if (spec.name == std::string_view("tap0_phase_rad"))ctl.shadow.tap0_phase_rad = static_cast<float>(value);
   else return false;

@@ -79,7 +79,8 @@ int main()
 
     require(nearly(live.path_loss_db, 12.0F), "path_loss_db should be 12");
     require(nearly(live.cfo_hz, 250.0F), "cfo_hz should be 250");
-    require(live.tap0_delay_samples == 6, "tap0_delay_samples should be lround(5.5) = 6");
+    require(nearly(live.tap0_delay_samples, 5.5F),
+            "tap0_delay_samples should round-trip the YAML fractional value");
     require(nearly(live.tap0_gain_db, -3.0F), "tap0_gain_db should be -3");
     require(nearly(live.tap0_phase_rad, 0.25F), "tap0_phase_rad should be 0.25");
     require(nearly(live.los_k_db, 9.0F), "los_k_db should be 9");
@@ -100,7 +101,7 @@ int main()
     // Empty chain → default snr_db remains the struct default (60 dB,
     // matches the YAML default in populate_mutable_params_from_yaml).
     require(live.awgn_snr_db == 60.0F, "empty chain → awgn_snr_db default 60");
-    require(live.tap0_delay_samples == 0, "empty chain → tap0_delay_samples zero");
+    require(live.tap0_delay_samples == 0.0F, "empty chain → tap0_delay_samples zero");
     require(live.tap0_gain_db == 0.0F, "empty chain → tap0_gain_db zero");
     require(live.tap0_phase_rad == 0.0F, "empty chain → tap0_phase_rad zero");
     require(live.los_k_db == 0.0F, "empty chain → los_k_db zero");
@@ -117,7 +118,7 @@ int main()
         ocg::populate_mutable_params_from_yaml(m, /*reference_power=*/0.0,
                                                /*sample_rate_hz=*/0);
     require(nearly(live.path_loss_db, 7.0F), "non-leading-tdl chain still picks up path_loss");
-    require(live.tap0_delay_samples == 0, "tap params untouched when tdl is not leading");
+    require(live.tap0_delay_samples == 0.0F, "tap params untouched when tdl is not leading");
     require(live.tap0_gain_db == 0.0F, "tap params untouched when tdl is not leading");
     require(live.los_k_db == 0.0F, "los params untouched when tdl is not leading");
   }

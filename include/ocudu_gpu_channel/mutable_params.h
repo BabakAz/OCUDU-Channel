@@ -35,8 +35,11 @@ struct MutableParams {
 
   // Per-edge channel params (consumed by apply_channel_kernel on CUDA or
   // apply_tdl_step{_fading} on CPU). Only the leading tap is mutable in v1;
-  // multi-tap profile swaps are v2.
-  int32_t  tap0_delay_samples  = 0;
+  // multi-tap profile swaps are v2. tap0_delay_samples is FLOAT so YAMLs
+  // with fractional delays (e.g. TR 38.901 TDL-A τ=2.5 samples) round-trip
+  // through the runtime control plane lossless; both backends recompute
+  // the per-tap polyphase coefficients from the fractional part on snap.
+  float    tap0_delay_samples  = 0.0F;
   float    tap0_gain_db        = 0.0F;
   float    tap0_phase_rad      = 0.0F;
   float    los_k_db            = 0.0F;

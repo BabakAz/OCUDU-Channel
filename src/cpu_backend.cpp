@@ -192,24 +192,51 @@ void CpuChannelProcessor::apply_chain_to_link(const std::string& link_key_value,
         }
         break;
       }
-      case ModelStepType::Tdl:
+      case ModelStepType::Tdl: {
         // Delegated to the shared apply_tdl_step / apply_tdl_step_fading
         // helpers in delay.h so the CPU and CUDA backends call literally the
-        // same multi-tap convolution. Tap data is read directly from step.taps
-        // (the live ModelConfig) -- no per-link cached copy; only the
-        // polyphase coefficient set, the cross-slot ring, and (for fading)
-        // the per-tap sub-ray seeds live in StepState.
+        // same multi-tap convolution.
+        //
+        // Phase 3 v1-fin-C: tap 0 is runtime-mutable on this backend too.
+        // Build effective_taps each slot by copying step.taps and overriding
+        // [0] with values from per-link `live`; mirror that into
+        // effective_polyphase (live keeps tap0_delay integer in v1, so
+        // polyphase[0] collapses to a unit impulse at i=3). The other taps
+        // pass through unchanged from the YAML chain and the cached
+        // polyphase. Per-slot copy cost is O(n_taps) ≤ 32 — negligible
+        // compared to the per-sample convolution.
+        std::vector<ocg::TapSpec> effective_taps = step.taps;
+        std::vector<std::array<float, kTdlFracFilterTaps>> effective_polyphase = step_state.tdl_polyphase;
+        if (!effective_taps.empty()) {
+          effective_taps[0].delay_samples = static_cast<double>(state.live.tap0_delay_samples);
+          effective_taps[0].gain_db       = static_cast<double>(state.live.tap0_gain_db);
+          effective_taps[0].phase_rad     = static_cast<double>(state.live.tap0_phase_rad);
+          if (effective_taps[0].is_los) {
+            effective_taps[0].los_k_db = static_cast<double>(state.live.los_k_db);
+          }
+          if (!effective_polyphase.empty()) {
+            // v1-fin-C: tap0_delay is float — recompute the 8-tap
+            // windowed-sinc polyphase from the fractional part. Same
+            // helper apply_tdl_step uses at prepare; keeps CPU↔CUDA
+            // parity intact.
+            const double tau_int = std::floor(effective_taps[0].delay_samples);
+            const double frac    = effective_taps[0].delay_samples - tau_int;
+            compute_windowed_sinc_taps(frac, effective_polyphase[0]);
+          }
+        }
+
         if (step.fading_enabled) {
           apply_tdl_step_fading(current.data(), next.data(), current.size(),
-                                step.taps, step_state.tdl_polyphase,
+                                effective_taps, effective_polyphase,
                                 step_state.delay_line, step_state.tdl_fading,
                                 sample_rate_hz);
         } else {
           apply_tdl_step(current.data(), next.data(), current.size(),
-                         step.taps, step_state.tdl_polyphase,
+                         effective_taps, effective_polyphase,
                          step_state.delay_line);
         }
         break;
+      }
     }
     std::swap(current, next);
   }

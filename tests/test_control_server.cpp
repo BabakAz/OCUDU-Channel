@@ -99,20 +99,22 @@ int main()
     require(nearly(ctl_b->shadow.los_k_db, 9.0F), "ctl_b shadow updated");
   }
 
-  // ── Case 4: integer param with non-integer value → rejected
+  // ── Case 4: fractional tap0_delay accepted (v1-fin-C — used to be int-only)
   {
     const std::string reply = server.handle_message(
         R"({"link_id":"ue0-gnb0","param":"tap0_delay_samples","value":3.5})");
-    require(contains(reply, "\"ok\":false"), "non-integer for int param should fail");
-    require(contains(reply, "requires an integer"), "error should mention integer requirement");
+    require(contains(reply, "\"ok\":true"), "fractional tap0_delay should be accepted");
+    require(nearly(ctl_a->shadow.tap0_delay_samples, 3.5F),
+            "shadow.tap0_delay_samples should be 3.5");
   }
 
-  // ── Case 5: integer param with integer value → accepted
+  // ── Case 5: integer value still accepted (no regression)
   {
     const std::string reply = server.handle_message(
         R"({"link_id":"ue0-gnb0","param":"tap0_delay_samples","value":7})");
-    require(contains(reply, "\"ok\":true"), "integer value for int param should succeed");
-    require(ctl_a->shadow.tap0_delay_samples == 7, "shadow.tap0_delay_samples should be 7");
+    require(contains(reply, "\"ok\":true"), "integer value should still work");
+    require(nearly(ctl_a->shadow.tap0_delay_samples, 7.0F),
+            "shadow.tap0_delay_samples should be 7.0");
   }
 
   // ── Case 6: out-of-range → rejected with informative message
@@ -167,8 +169,8 @@ int main()
   {
     const auto s = server.stats();
     require(s.msgs_received == 11, "msgs_received should equal total handled messages");
-    require(s.updates_applied == 4, "4 successful updates: cases 1, 2, 3, 5");
-    require(s.updates_rejected == 7, "7 rejections: cases 4, 6, 7, 8, 9, 10, 11");
+    require(s.updates_applied == 5, "5 successful updates: cases 1, 2, 3, 4, 5");
+    require(s.updates_rejected == 6, "6 rejections: cases 6, 7, 8, 9, 10, 11");
   }
 
   // ── Case 13 (C4): log lines reconstruct the experiment trace
@@ -176,14 +178,14 @@ int main()
     std::lock_guard<std::mutex> g(log_mu);
     require(log_lines.size() == 11, "every REQ must emit exactly one log line");
 
-    // 4 control_update + 7 control_error
+    // 5 control_update + 6 control_error
     std::size_t updates = 0, errors = 0;
     for (const auto& line : log_lines) {
       if (line.rfind("event=control_update", 0) == 0) ++updates;
       else if (line.rfind("event=control_error", 0) == 0) ++errors;
     }
-    require(updates == 4, "should see 4 event=control_update lines");
-    require(errors == 7, "should see 7 event=control_error lines");
+    require(updates == 5, "should see 5 event=control_update lines");
+    require(errors == 6, "should see 6 event=control_error lines");
 
     // First successful update should carry the before-and-after values.
     require(contains(log_lines[0], "event=control_update"), "first line is an update");

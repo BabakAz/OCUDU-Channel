@@ -62,7 +62,7 @@ MutableParams populate_mutable_params_from_yaml(
     const auto& leading = model.chain.front();
     if (!leading.taps.empty()) {
       const auto& tap0 = leading.taps.front();
-      out.tap0_delay_samples = static_cast<int32_t>(std::lround(tap0.delay_samples));
+      out.tap0_delay_samples = static_cast<float>(tap0.delay_samples);
       out.tap0_gain_db       = static_cast<float>(tap0.gain_db);
       out.tap0_phase_rad     = static_cast<float>(tap0.phase_rad);
       out.los_k_db           = static_cast<float>(tap0.los_k_db);
