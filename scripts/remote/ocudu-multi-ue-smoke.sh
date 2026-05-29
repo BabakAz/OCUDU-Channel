@@ -17,6 +17,9 @@ source "${script_dir}/common.sh"
 
 duration_seconds="${OCUDU_MUE_DURATION_SECONDS:-45}"
 build_docker="${OCUDU_MUE_BUILD_DOCKER:-1}"
+# Non-empty = run the broker as this Docker image (docker run --gpus all
+# --network host) instead of the native build. Default = native binary.
+broker_image="${OCUDU_MUE_BROKER_IMAGE:-}"
 # srsUE launch stagger: srsRAN ZMQ radios share the broker's lock-step virtual
 # time, so two UEs started together transmit the identical RACH preamble on the
 # identical PRACH occasion and the gNB merges them onto one C-RNTI. Starting ue1
@@ -44,7 +47,8 @@ remote_sh bash -s -- \
   "${duration_seconds}" \
   "${build_docker}" \
   "${srsran_ref}" \
-  "${ue_stagger_seconds}" <<'REMOTE'
+  "${ue_stagger_seconds}" \
+  "${broker_image}" <<'REMOTE'
 set -euo pipefail
 
 workspace="$1"
@@ -56,6 +60,8 @@ duration_seconds="$6"
 build_docker="$7"
 srsran_ref="$8"
 ue_stagger_seconds="$9"
+# Default-empty: an empty trailing arg can be dropped in ssh transport.
+broker_image="${10:-}"
 
 expand_remote_path() {
   case "$1" in
@@ -264,6 +270,7 @@ cleanup() {
   [[ -n "${ue0_pid}" ]] && kill "${ue0_pid}" >/dev/null 2>&1
   [[ -n "${ue1_pid}" ]] && kill "${ue1_pid}" >/dev/null 2>&1
   [[ -n "${broker_pid}" ]] && kill "${broker_pid}" >/dev/null 2>&1
+  [[ -n "${broker_image}" ]] && docker rm -f ocudu_broker_mue >/dev/null 2>&1
   docker rm -f ocudu_srsue_0 ocudu_srsue_1 >/dev/null 2>&1
   docker cp ocudu_gnb:/tmp/gnb.log "${log_dir}/ocudu-gnb-internal.log" >/dev/null 2>&1
   "${compose[@]}" logs --no-color >"${log_dir}/docker-compose.log" 2>&1
@@ -293,10 +300,22 @@ done
 echo "open5gs: ${h:-?}"
 
 # CUDA broker on the multi-UE topology (gnb0 RX = ue0->gnb0 + ue1->gnb0).
-"${cuda_build}/ocudu-gpu-channel" \
-  --config "${project_root}/examples/topology.ocudu-docker.multi-ue.cuda.yaml" \
-  --duration "${duration_seconds}s" >"${log_dir}/broker.log" 2>&1 &
-broker_pid="$!"
+# Native binary by default; container image when OCUDU_MUE_BROKER_IMAGE is set.
+if [[ -z "${broker_image}" ]]; then
+  "${cuda_build}/ocudu-gpu-channel" \
+    --config "${project_root}/examples/topology.ocudu-docker.multi-ue.cuda.yaml" \
+    --duration "${duration_seconds}s" >"${log_dir}/broker.log" 2>&1 &
+  broker_pid="$!"
+else
+  echo "broker mode: container image ${broker_image}" >"${log_dir}/broker-mode.txt"
+  docker run --rm --name ocudu_broker_mue \
+    --gpus all --network host \
+    -v "${project_root}:/work:ro" \
+    "${broker_image}" \
+    --config "/work/examples/topology.ocudu-docker.multi-ue.cuda.yaml" \
+    --duration "${duration_seconds}s" >"${log_dir}/broker.log" 2>&1 &
+  broker_pid="$!"
+fi
 
 "${compose[@]}" up -d gnb >"${log_dir}/docker-gnb-up.log" 2>&1
 sleep 3
