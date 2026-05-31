@@ -764,7 +764,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   <p class="key"><b>Worked example.</b> A device with
   <code>tx_timing_offset_samples: 2</code> and a link from it carrying
   <code>propagation_delay_samples: 4</code> on top of a base model whose chain
-  starts with <code>tdl{(1.0, 0 dB, 0)}</code> ends up with a synthesized leading
+  starts with <code>tdl{(1.0, 0 dB, 0)}</code> ends up with a synthesised leading
   <code>tdl{(7.0, 0 dB, 0)}</code> — the tap delay shifts from 1 to
   1 + (2 + 4) = 7. At idx = 7 the receiver sees the source's sample 0. For a
   runnable variant of this composition see
@@ -1533,7 +1533,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   </svg>
   <figcaption>Diagram H — per-source rings + co-initialised cursors + a common-window read.
   Co-init gives every edge a shared time origin; the common-window rule keeps them aligned
-  every serve. (Wall-clock pacing is visualized separately in Diagram L; per-edge delay in
+  every serve. (Wall-clock pacing is visualised separately in Diagram L; per-edge delay in
   Diagram M.)</figcaption>
   </figure>
 
@@ -3120,7 +3120,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
     <li><b>TDL-A profile</b> — TR 38.901 §7.7.2 23-tap NLOS + Jakes 100 Hz on
         every edge; bench p99 in the green band; <code>avg_power_cum</code>
         within ±1.5 power units of the analytic expectation (the same
-        tolerance the CPU↔CUDA matching test uses for single-realization
+        tolerance the CPU↔CUDA matching test uses for single-realisation
         fading variance).</li>
   </ol>
 
