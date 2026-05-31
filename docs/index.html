@@ -352,8 +352,8 @@
       <div>TDL-A..E profiles &middot; Jakes + Rician on the GPU</div>
     </div>
     <div class="panel">
-      <div class="num"><span style="color:var(--muted)">58 ms</span> &rarr; 319 &micro;s</div>
-      <div>CPU &rarr; GPU per-edge channel<br>(TDL-A 23-tap, 16-edge fan-in)</div>
+      <div class="num"><span style="color:var(--muted)">58 430 &micro;s</span> &rarr; 319 &micro;s</div>
+      <div>CPU &rarr; GPU per-edge channel, &asymp;183&times;<br>(TDL-A 23-tap, 16-edge fan-in)</div>
     </div>
     <div class="panel">
       <div class="num">1e&#8209;3</div>
@@ -487,7 +487,7 @@
   <table>
     <tr><th>Name</th><th>What it is</th></tr>
     <tr><td class="mono">apply_chain()</td><td><code>__device__</code> function that walks one chain on (i, q) in registers; called inside both kernels</td></tr>
-    <tr><td class="mono">apply_steps_kernel</td><td>single-link kernel; also runs in-place as the <code>rx_model</code> pass after <code>superpose_kernel</code></td></tr>
+    <tr><td class="mono">apply_steps_kernel</td><td>single-edge kernel; also runs in-place as the <code>rx_model</code> pass after <code>superpose_kernel</code></td></tr>
     <tr><td class="mono">superpose_kernel</td><td>multi-edge superposition kernel — one thread per output sample, walks every edge, sums into <code>dst[idx]</code></td></tr>
     <tr><td class="mono">stage_link()</td><td>host-side fallback helper that runs the chain-leading <code>tdl</code> step (multi-tap convolution via <code>apply_tdl_step{_fading}</code> in <code>delay.h</code>) before the H2D copy. The production path is <code>apply_channel_kernel</code> on device (§11 Diagram S); <code>stage_link()</code> runs only when the per-node dispatch gate doesn't fire (mixed-edge or non-tdl-leading topologies), and as the CPU-backend reference</td></tr>
     <tr><td class="mono">apply_channel_kernel</td><td>device-side per-edge channel kernel in <code>src/device_channel.cu</code> — runs the multi-tap convolution + Jakes Doppler + Rician LOS on the GPU, materialising the per-tap coarse grid in block shared memory at slot start. Production path for all-leading-tdl topologies; landed Phase 2 D3</td></tr>
@@ -606,7 +606,7 @@
       <div class="tier-label">GPU · CUDA backend</div>
       <div class="tier-cells">
         <div class="tier-cell">superpose_kernel <small>per-thread loop over N edges</small></div>
-        <div class="tier-cell">apply_steps_kernel <small>single-link + in-place rx_model</small></div>
+        <div class="tier-cell">apply_steps_kernel <small>single-edge + in-place rx_model</small></div>
         <div class="tier-cell">apply_chain() <small>device fn: Scale / Phase / AddNoise</small></div>
       </div>
     </div>
@@ -1757,7 +1757,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   <figcaption>Diagram M — the same virtual time index <span class="mono">idx</span> reaches
   different source-sequence positions on different edges, because each edge applies its
   own leading <code>tdl</code> with delay d<sub>k</sub> (for the single-tap case the
-  diagram illustrates; multi-tap simply produces several echoes at d<sub>k</sub>, d<sub>k</sub>+τ₁, …
+  diagram illustrates; multi-tap produces several echoes at d<sub>k</sub>, d<sub>k</sub>+τ₁, …
   in parallel). At idx = 7 the receiver integrates
   <span class="mono">src 0</span>'s sample 5 (= 7 − d<sub>0</sub>) and
   <span class="mono">src 1</span>'s sample 2 (= 7 − d<sub>1</sub>). d<sub>k</sub>
@@ -3659,7 +3659,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
 
   <h3 id="perf-bottleneck">20.3 Where the latency goes — per-phase breakdown</h3>
   <p>The CUDA per-call cost decomposes into three components that scale
-  very differently with edge count:</p>
+  differently with edge count:</p>
   <ul class="tight">
     <li><b>H2D dominates and scales linearly with N</b> — staged buffer is
         <span class="mono">N × 23 040 × 8 B</span>; transfer time grows
