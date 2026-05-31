@@ -723,7 +723,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   (<a href="#alignment">§9</a>, Layer 2). The YAML exposes a named knob
   for each so a topology can express each one cleanly; at config-load time
   <code>fold_link_leading_delays()</code> sums them and merges the total into the
-  link's effective chain.</p>
+  edge's effective chain.</p>
   <table>
     <tr><th>Knob</th><th>Scope</th><th>YAML key</th><th>Physical meaning</th></tr>
     <tr>
@@ -1748,8 +1748,8 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
     <text x="880" y="158" fill="#9aa7bd" text-anchor="middle" font-size="10">src 1 sample (7−d_1) = 2</text>
 
     <!-- Annotation lines: where d_k comes from -->
-    <text x="20" y="230" fill="#ffb454" font-size="12">Where d_k comes from (summed per link):</text>
-    <text x="40" y="252" fill="#cdd6e6" font-size="11">·  <tspan fill="#ffb454">propagation delay</tspan>  —  per-edge geometry, YAML: propagation_delay_samples on the link</text>
+    <text x="20" y="230" fill="#ffb454" font-size="12">Where d_k comes from (summed per edge):</text>
+    <text x="40" y="252" fill="#cdd6e6" font-size="11">·  <tspan fill="#ffb454">propagation delay</tspan>  —  per-edge geometry, YAML: propagation_delay_samples on the edge</text>
     <text x="40" y="270" fill="#cdd6e6" font-size="11">·  <tspan fill="#ffb454">tx timing offset</tspan>  —  per-device constant lag, YAML: tx_timing_offset_samples on the device</text>
     <text x="40" y="288" fill="#cdd6e6" font-size="11">·  <tspan fill="#9aa7bd">explicit chain step</tspan>  —  tdl as the chain's first step (single-tap with delay_samples = d_k; see §5)</text>
     <text x="20" y="316" fill="#9aa7bd" font-size="10">Dashed cells = the delay_line tail kept on the host across slot boundaries so even the earliest idx in a slot has a defined delayed lookup.</text>
@@ -1924,7 +1924,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
         — edges sharing a source share the input slot, then apply their
         own per-edge channel state. Writes
         <span class="mono">device_staged[k · count + idx]</span>.</li>
-    <li><b><code>update_delay_line_kernel</code></b> — roll each link's
+    <li><b><code>update_delay_line_kernel</code></b> — roll each edge's
         <span class="mono">delay_line</span> ring forward by
         <span class="mono">count</span> samples; advance
         <span class="mono">slot_start_samples</span> (cross-slot continuity,
@@ -2121,7 +2121,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
     <text x="160" y="74" fill="#6fd08c" text-anchor="middle" font-size="11">prepare() · ONCE</text>
     <text x="160" y="98" fill="#cdd6e6" text-anchor="middle" font-size="10">YAML → DeviceLinkState[]</text>
     <text x="160" y="116" fill="#cdd6e6" text-anchor="middle" font-size="10">cudaMemcpy H2D</text>
-    <text x="160" y="138" fill="#9aa7bd" text-anchor="middle" font-size="9">~10 KB per link</text>
+    <text x="160" y="138" fill="#9aa7bd" text-anchor="middle" font-size="9">~10 KB per edge</text>
 
     <line x1="280" y1="100" x2="320" y2="100" stroke="#9aa7bd" marker-end="url(#arxn)"/>
 
@@ -2735,7 +2735,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
     <li><b>Steps buffer</b> — <span class="mono">sizeof(GpuStep) · N · max_steps</span>
         bytes per side. At <span class="mono">sizeof(GpuStep) = 24</span>,
         <span class="mono">max_steps = 5</span>: ~960 B per N=8 node — tiny.</li>
-    <li><b>delay_line ring</b> — per link, <span class="mono">8 · (d + 2)</span>
+    <li><b>delay_line ring</b> — per edge, <span class="mono">8 · (d + 2)</span>
         bytes host-only, where <span class="mono">d</span> is the chain-leading
         delay in samples. Negligible unless <span class="mono">d</span> is huge.</li>
   </ul>
@@ -2872,7 +2872,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   <table>
     <tr><th>Message type</th><th>Purpose</th><th>Key REQ fields</th><th>Key REP fields</th></tr>
     <tr><td><code>scalar</code></td>
-        <td>Mutate one of seven runtime params on one link (v1).</td>
+        <td>Mutate one of seven runtime params on one edge (v1).</td>
         <td><code>link_id, param, value, take_effect_at_slot?, batch_id?</code></td>
         <td><code>applied_at_slot</code></td></tr>
     <tr><td><code>profile_swap</code></td>
@@ -2889,7 +2889,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
         <td>&mdash;</td></tr>
     <tr><td><code>batch_commit</code></td>
         <td>Flush every staged op with a single
-        <code>take_effect_at_slot</code> shared across every link touched
+        <code>take_effect_at_slot</code> shared across every edge touched
         (per-edge slot-index atomicity).</td>
         <td><code>batch_id, take_effect_at_slot?</code></td>
         <td><code>apply_at_slot, link_count</code></td></tr>
@@ -2909,12 +2909,12 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
 
   <p><b>Telemetry PUB feed (v3.0).</b> A second optional socket bound at
   <code>tcp://*:5560</code> via <code>--telemetry-endpoint</code> publishes
-  one frame per link per <code>--telemetry-rate-hz</code> tick (default
+  one frame per edge per <code>--telemetry-rate-hz</code> tick (default
   20&nbsp;Hz). Each frame is a JSON <code>event=telemetry</code> body with
   <code>link_id, slot, seqno, live{…}, profile_active, warmup_until_slot</code>;
   the ZMQ topic prefix is <code>link_id</code> so a subscriber can filter
   via <code>setsockopt(ZMQ_SUBSCRIBE, "ue0-gnb0", …)</code>. Empty
-  subscription receives every link. Backpressure is handled by ZMQ HWM;
+  subscription receives every edge. Backpressure is handled by ZMQ HWM;
   slow subscribers cause <code>telemetry_drops</code> to accumulate rather
   than blocking the broker.</p>
 
@@ -3104,7 +3104,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   broker or CUDA backend ships.</b> Each step adds a layer:</p>
   <ol class="tight">
     <li>CUDA release build (rsync local tree → build → check exit).</li>
-    <li>ctest 8/8 on the remote box (same suite as §21.1 above, GPU
+    <li>ctest 8/8 on the remote box (same suite as §18.1 above, GPU
         path enabled so all <code>OCUDU_GPU_CHANNEL_HAS_CUDA</code> blocks
         actually run).</li>
     <li>Synthetic CUDA relay loop — clean 0 dB channel, sink measures
@@ -3162,7 +3162,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   mismatches between CPU and CUDA) and runs pre-ship; Layer 3 catches
   protocol-stack wedges that only manifest with a real radio stack and
   runs at milestone boundaries. The specific guards in each layer are
-  named in §21.1 – §18.3 above.</figcaption>
+  named in §18.1 – §18.3 above.</figcaption>
   </figure>
 
   <h2 id="profiling">19. Profiling — instrumentation system design</h2>

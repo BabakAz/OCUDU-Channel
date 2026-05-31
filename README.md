@@ -41,7 +41,7 @@ the **unit tests** (`ctest`) and the **synthetic GPU validation**
   on the GPU by default via `apply_channel_kernel`; host `stage_link()` stays
   as the CPU reference and the CUDA fallback. Moving it host → device took the
   per-edge channel for `tdl-a_E16` (1 gNB + 8 UEs, TDL-A 23-tap + Jakes 100 Hz
-  on all 16 edges) from **58 430 µs → 319 µs** (≈180×) — well inside the 1 ms
+  on all 16 edges) from **58 430 µs → 319 µs** (≈183×) — well inside the 1 ms
   slot budget.
 
 **Supported chain steps today:** `tdl` (tapped delay line — covers
