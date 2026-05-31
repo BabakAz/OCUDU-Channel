@@ -401,7 +401,7 @@
   <b>Part&nbsp;IV (§14–§16)</b> is the supporting infrastructure — CPU/CUDA
   backend pair (the parity contract), signal memory (Diagram D), multi-stream
   concurrency (Diagram I).
-  <b>Part&nbsp;V (§17)</b> is the runtime control plane that mutates per-link
+  <b>Part&nbsp;V (§17)</b> is the runtime control plane that mutates per-edge
   channel parameters at slot boundaries without restarting the broker.
   <b>Part&nbsp;VI (§18–§21)</b> is engineering: validation (Diagram TA),
   profiling instrumentation (Diagram N), measured performance (Diagrams O,
@@ -432,7 +432,7 @@
   <table>
     <tr><th>Term</th><th>Meaning</th></tr>
     <tr><td class="mono">node</td><td>a device in the graph (a gNB or a UE); the broker serves one RX signal per node, per slot</td></tr>
-    <tr><td class="mono">link / edge</td><td>a directed channel from one node to another, configured under <code>links:</code> in the YAML topology with a named <code>model</code></td></tr>
+    <tr><td class="mono">edge</td><td>a directed channel from one node to another, configured under <code>links:</code> in the YAML topology with a named <code>model</code>. <b>This doc says "edge" in prose</b> (a node's "incoming edges" are the edges pointing at it); the YAML key <code>links:</code> and the runtime identifiers <code>link_id</code> / <code>link_key</code> keep the word "link" because they are API names</td></tr>
     <tr><td class="mono">incoming edges</td><td>for destination node <span class="mono">d</span>, the subset of links where <span class="mono">link.to == d</span>. Resolved once per server thread at broker startup (<code>src/broker.cpp</code>); this list is the index space for cursors (§9), staged slots (§10), per-edge <code>stage_link()</code> calls (§11), and the kernel's per-thread edge loop (§12)</td></tr>
     <tr><td class="mono">model</td><td>a chain of channel steps (tdl, path_loss, phase, CFO, AWGN) applied per-edge under <code>models:</code> in the YAML</td></tr>
     <tr><td class="mono">rx_model</td><td>an optional second model applied <b>once to the summed RX</b> of a node — typically a thermal-noise floor</td></tr>
@@ -466,9 +466,9 @@
     <tr><td class="mono">device_rx_steps</td>
         <td>optional second chain (the <code>rx_model</code>) — consumed by an in-place <code>apply_steps_kernel</code> pass after <code>superpose_kernel</code></td></tr>
   </table>
-  <p class="key">Per-link state lives in <code>CudaLinkSlot</code> (just the
+  <p class="key">Per-edge state lives in <code>CudaLinkSlot</code> (just the
   <code>LinkModelState</code> — the chain steps, Philox seed, and
-  <code>delay_line</code> ring). The bench-only per-link scratch buffers
+  <code>delay_line</code> ring). The bench-only per-edge scratch buffers
   (<span class="mono">host_input · device_input · device_steps · host_output ·
   device_output</span>) and their lazy-allocation path were unified away with
   the old <code>process_into</code> API; the broker's superposition serve
@@ -493,7 +493,7 @@
     <tr><td class="mono">apply_channel_kernel</td><td>device-side per-edge channel kernel in <code>src/device_channel.cu</code> — runs the multi-tap convolution + Jakes Doppler + Rician LOS on the GPU, materialising the per-tap coarse grid in block shared memory at slot start. Production path for all-leading-tdl topologies; landed Phase 2 D3</td></tr>
     <tr><td class="mono">process_superposition</td><td>the sole CPU / CUDA processor entry point; called by the broker for N-edge fan-in and by the benchmark / tests for the N=1 single-edge case (an earlier <code>process_into</code> API was unified away — see §20.1)</td></tr>
     <tr><td class="mono">serve</td><td>one broker iteration for a destination node: read inputs from each source's ring, stage them, run the kernel, send the result over ZMQ</td></tr>
-    <tr><td class="mono">cursor</td><td>per-link <code>std::atomic&lt;uint64_t&gt;</code> pointing into its source's IQ ring; co-initialised across edges so superposition aligns every edge's same virtual instant</td></tr>
+    <tr><td class="mono">cursor</td><td>per-edge <code>std::atomic&lt;uint64_t&gt;</code> pointing into its source's IQ ring; co-initialised across edges so superposition aligns every edge's same virtual instant</td></tr>
     <tr><td class="mono">pinned memory</td><td>host memory allocated with <code>cudaHostAlloc</code>; required for <code>cudaMemcpyAsync</code> to actually run async over PCIe DMA</td></tr>
     <tr><td class="mono">Philox4_32_10</td><td>NVIDIA's <b>counter-based</b> stateless RNG; same <code>(seed, counter)</code> always produces the same draw, so AWGN is bit-reproducible across runs and across thread schedules</td></tr>
   </table>
@@ -621,12 +621,12 @@
   <p class="sub">Everything the user writes in YAML &mdash; the topology graph, the channel chain, and the physics the chain encodes.</p>
 
   <h2 id="topology">4. Topology graph and YAML model</h2>
-  <p>The topology is a directed graph: nodes are devices (gNBs and UEs); links are channel
+  <p>The topology is a directed graph: nodes are devices (gNBs and UEs); edges are channel
   edges between them, each with a named <code>model</code>. The broker reads
   <code>examples/topology.*.yaml</code>, builds one server thread per node, and one
   <code>CudaLinkSlot</code> per link. The 3-node example below
-  (<code>examples/topology.graph.cuda.yaml</code>) carries both <b>desired</b> links (downlink
-  + uplink) and <b>crosstalk</b> links (UE↔UE leakage).</p>
+  (<code>examples/topology.graph.cuda.yaml</code>) carries both <b>desired</b> edges (downlink
+  + uplink) and <b>crosstalk</b> edges (UE↔UE leakage).</p>
   <figure>
   <svg viewBox="0 0 700 380" font-family="SF Mono,Menlo,monospace" font-size="12">
     <defs>
@@ -685,7 +685,7 @@
     </g>
   </svg>
   <figcaption>Diagram G — directed-graph topology. Nodes are EXTERNAL SDR
-  endpoints (grey per §2.1). Solid green = desired links (primary signal
+  endpoints (grey per §2.1). Solid green = desired edges (primary signal
   flow); dashed amber = crosstalk (secondary path, FALLBACK modifier visual).
   Every node has its own <code>rx_model</code> noise floor, applied once
   to the summed RX. The broker sums all edges arriving at each node.</figcaption>
@@ -712,7 +712,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   <code>tests/test_processing.cpp</code>). YAML keys per step type:</p>
   <table>
     <tr><th>Step type</th><th>YAML keys</th><th>Effect</th></tr>
-    <tr><td><code>tdl</code></td><td><code>taps:</code> block of <code>{delay_samples, gain_db, phase_rad}</code> (+ optional <code>fading:</code> sub-config and per-tap <code>is_los</code> / <code>los_k_db</code> / <code>los_angle_rad</code>)</td><td>Tapped delay line — the chain-leading propagation step. Each tap shifts the signal by <code>delay_samples</code> (integer or fractional, resolved by the shared 8-tap Hamming-windowed sinc in <code>delay.h</code>) and applies its complex tap weight <code>10<sup>gain_db/20</sup>·exp(j·phase_rad)</code>; with a <code>fading</code> sub-config each tap's weight becomes time-varying with a Jakes-shaped Doppler spectrum (plus optional Rician LOS specular). Applied <b>device-side by default</b> in <code>apply_channel_kernel</code> (<a href="#kernels">§11 Diagram S</a>) for any topology where every incoming edge has a leading <code>tdl</code>; falls back to host-side <code>stage_link()</code> calling <code>apply_tdl_step{_fading}</code> in <code>delay.h</code> for mixed-edge or non-tdl-leading nodes. Cross-slot history lives in a per-link <code>delay_line</code> ring (in <code>DeviceLinkState</code> global memory on the device path, in the host <code>LinkModelState</code> on the fallback). A single tap with <code>delay_samples = 0</code> is the static-gain case (subsumes the old <code>gain</code> step); a single tap with non-zero delay subsumes the old <code>integer_delay</code> / <code>fractional_delay</code> steps. The chain-leading constraint is enforced by <code>validate_cuda_support</code>; a non-leading <code>tdl</code> is rejected on the CUDA path (CPU accepts it anywhere).</td></tr>
+    <tr><td><code>tdl</code></td><td><code>taps:</code> block of <code>{delay_samples, gain_db, phase_rad}</code> (+ optional <code>fading:</code> sub-config and per-tap <code>is_los</code> / <code>los_k_db</code> / <code>los_angle_rad</code>)</td><td>Tapped delay line — the chain-leading propagation step. Each tap shifts the signal by <code>delay_samples</code> (integer or fractional, resolved by the shared 8-tap Hamming-windowed sinc in <code>delay.h</code>) and applies its complex tap weight <code>10<sup>gain_db/20</sup>·exp(j·phase_rad)</code>; with a <code>fading</code> sub-config each tap's weight becomes time-varying with a Jakes-shaped Doppler spectrum (plus optional Rician LOS specular). Applied <b>device-side by default</b> in <code>apply_channel_kernel</code> (<a href="#kernels">§11 Diagram S</a>) for any topology where every incoming edge has a leading <code>tdl</code>; falls back to host-side <code>stage_link()</code> calling <code>apply_tdl_step{_fading}</code> in <code>delay.h</code> for mixed-edge or non-tdl-leading nodes. Cross-slot history lives in a per-edge <code>delay_line</code> ring (in <code>DeviceLinkState</code> global memory on the device path, in the host <code>LinkModelState</code> on the fallback). A single tap with <code>delay_samples = 0</code> is the static-gain case (subsumes the old <code>gain</code> step); a single tap with non-zero delay subsumes the old <code>integer_delay</code> / <code>fractional_delay</code> steps. The chain-leading constraint is enforced by <code>validate_cuda_support</code>; a non-leading <code>tdl</code> is rejected on the CUDA path (CPU accepts it anywhere).</td></tr>
     <tr><td><code>path_loss</code></td><td><code>path_loss_db</code></td><td>Scale branch, sign-flipped vs. gain — attenuation. <code>step.a</code> = <code>10<sup>−path_loss_db/20</sup></code>.</td></tr>
     <tr><td><code>phase</code></td><td><code>phase_rad</code></td><td>static phase rotation — <code>step.a</code> = phase, <code>step.b</code> = 0</td></tr>
     <tr><td><code>cfo</code></td><td><code>cfo_hz</code></td><td>linear phase drift = carrier frequency offset — <code>step.b</code> = <code>2π·f<sub>cfo</sub>/f<sub>s</sub></code></td></tr>
@@ -728,10 +728,10 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
     <tr><th>Knob</th><th>Scope</th><th>YAML key</th><th>Physical meaning</th></tr>
     <tr>
       <td><b>Propagation delay</b></td>
-      <td>per-link</td>
+      <td>per-edge</td>
       <td><code>propagation_delay_samples</code> on a <code>LinkConfig</code></td>
       <td>Geometry-driven physical propagation along this specific edge. One
-          sample at 23.04 MS/s is ~13 m free-space. Different outbound links of
+          sample at 23.04 MS/s is ~13 m free-space. Different outbound edges of
           the same source can carry different values.</td>
     </tr>
     <tr>
@@ -739,26 +739,26 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
       <td>per-device</td>
       <td><code>tx_timing_offset_samples</code> on a <code>DeviceConfig</code></td>
       <td>Constant TX-start-time lag of this endpoint — applies uniformly to
-          every outgoing link of the device. Models a radio that brought its
+          every outgoing edge of the device. Models a radio that brought its
           ZMQ TX socket up later than the others.</td>
     </tr>
     <tr>
       <td><b>Explicit chain step</b></td>
-      <td>per-link (via model)</td>
+      <td>per-edge (via model)</td>
       <td>A leading <code>tdl</code> step in the model's chain</td>
       <td>The raw mechanism. Use directly when neither of the above scopes
           fits — e.g., a model that explicitly needs a multi-tap delay
           profile beyond a single propagation offset.</td>
     </tr>
   </table>
-  <p class="key"><b>Composition rules.</b> All three are summed per link.
+  <p class="key"><b>Composition rules.</b> All three are summed per edge.
   If the model's chain already leads with a <code>tdl</code> step,
   <code>fold_link_leading_delays()</code> shifts every tap's
   <code>delay_samples</code> by the composed offset (preserving multi-tap
   multipath structure); otherwise a single-tap <code>tdl</code> with the
   composed offset is prepended. Fractional totals are carried through directly
   by the polyphase-sinc resolution in <code>apply_tdl_step</code>. Negative
-  values for either named knob are rejected at load time. The per-link
+  values for either named knob are rejected at load time. The per-edge
   <code>delay_line</code> ring fills on the first serve and the composed offset
   becomes constant for the run.</p>
   <p class="key"><b>Worked example.</b> A device with
@@ -820,7 +820,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   2-ray ground-reflection, indoor multipath. Memory cost is roughly the
   same as a single-tap edge today and <b>~24× lower</b> than the naive
   "N parallel edges per link" approach for a 23-tap TDL-A profile,
-  because the cross-slot history is one ring per link rather than one
+  because the cross-slot history is one ring per edge rather than one
   per tap.</p>
 
   <!-- ============ DIAGRAM P : TDL profile power-delay profiles ============ -->
@@ -858,8 +858,8 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   is the Fourier transform of the other (the WSSUS framework, Bello 1963).
   Everything else about the tap follows from that single choice.</p>
 
-  <p><b>Default spectrum: Jakes' classical (per link, not per tap).</b>
-  Cosine-symmetric around 0 Hz, parameterised by a <b>single per-link</b>
+  <p><b>Default spectrum: Jakes' classical (per edge, not per tap).</b>
+  Cosine-symmetric around 0 Hz, parameterised by a <b>single per-edge</b>
   max-Doppler frequency
   <span class="mono">f<sub>d,max</sub> = v · f<sub>c</sub> / c</span> set
   by the UE velocity — stationary radio mismatch ≈ 0 Hz, pedestrian at
@@ -881,7 +881,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   not a fading parameter.</p>
 
   <p><b>Per-tap variation comes from sub-ray angles, not from different
-  velocities.</b> The per-link
+  velocities.</b> The per-edge
   <span class="mono">f<sub>d,max</sub></span> is the bound; each tap
   independently draws <span class="mono">M ≈ 20</span> random sub-ray
   angles <span class="mono">α<sub>k,m</sub></span> uniform in
@@ -897,7 +897,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   (TDL-D / TDL-E) adds a deterministic specular component to the first
   tap with Doppler shift
   <span class="mono">f<sub>d,max</sub> · cos(α<sub>LOS</sub>)</span> —
-  also derived from the same per-link
+  also derived from the same per-edge
   <span class="mono">f<sub>d,max</sub></span>, not an independent
   per-tap value.</p>
 
@@ -974,7 +974,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   (<b>TDL-A</b> through <b>TDL-E</b>) ship as ready-to-run example
   topologies in
   <code>examples/topology.tdl-{a,b,c,d,e}.cuda.yaml</code>. Each YAML is a
-  bidirectional gNB↔UE pair with the profile applied to both links.</p>
+  bidirectional gNB↔UE pair with the profile applied to both edges.</p>
 
   <p><b>Translation rule.</b> The published normalised delays are scaled
   to samples at the project's 23.04 MS/s reference rate and a 100 ns
@@ -1029,7 +1029,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   </ul>
   <p>All example YAMLs, all tests, and the perf-sweep scripts were
   migrated to the <code>tdl</code> shape in the same Phase 1.3 sequence.
-  The per-link delay knobs
+  The per-edge delay knobs
   (<code>device.tx_timing_offset_samples</code>,
   <code>link.propagation_delay_samples</code>) kept their semantics but
   now fold into the chain-leading <code>tdl</code> step
@@ -1045,7 +1045,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   link-wide constant offset; and a <i>stochastic</i> Doppler spread via
   the <code>tdl</code> step's <code>fading:</code> sub-config (Phase 1.4)
   — the per-tap Jakes-shaped spectrum that emerges from sub-ray angles
-  within each cluster, all bounded by the same per-link
+  within each cluster, all bounded by the same per-edge
   <span class="mono">f<sub>d,max</sub></span>, plus optional per-tap
   Rician LOS specular for TDL-D / TDL-E-style profiles.</p>
 
@@ -1269,7 +1269,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   non-tdl-leading incoming edge. The device kernel never sees
   <code>superposition[]</code> directly — it sees the packed result
   (<code>device_source_iq[s · count + idx]</code> indexed per edge via
-  <code>DeviceLinkState::src_index</code>, plus per-link
+  <code>DeviceLinkState::src_index</code>, plus per-edge
   <code>DeviceLinkState</code> + <code>step_meta[2N]</code>) built host-side
   from <code>superposition[]</code> and shipped via H2D. H2D bytes per slot
   scale with <b>source count</b>, not edge count.</figcaption>
@@ -1416,7 +1416,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
     <li><b>Read</b> the common window from each source ring at its cursor — N separate
         per-edge sample arrays, each <code>serve</code> samples long, all representing
         the same source-time slice.</li>
-    <li><b>Apply per-link leading propagation</b> — by default on the device kernel
+    <li><b>Apply per-edge leading propagation</b> — by default on the device kernel
         <code>apply_channel_kernel</code> (Phase 2 D3 + D4): raw IQ is packed per
         UNIQUE source into <code>host_source_iq</code> (D4 source rebuffering —
         N edges sharing a source share one slot, indexed by
@@ -1452,9 +1452,9 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
         same virtual time slice on every serve, so the kernel's
         <code>staged[k·count + idx]</code> for different <code>k</code> always represents
         the same instant in source time.</li>
-    <li><b>Per-link propagation delay</b> — a chain-leading <code>tdl</code> step
+    <li><b>Per-edge propagation delay</b> — a chain-leading <code>tdl</code> step
         shifts an edge back in time (and optionally splits it across multipath taps),
-        with continuity preserved across slot boundaries via a per-link
+        with continuity preserved across slot boundaries via a per-edge
         <code>delay_line</code> ring (in <code>DeviceLinkState</code> global memory
         on the device path, in <code>LinkModelState</code> on the host fallback).</li>
     <li><b>Wall-clock throttle</b> — the server thread sleeps to pace serves at exactly
@@ -1533,7 +1533,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   </svg>
   <figcaption>Diagram H — per-source rings + co-initialised cursors + a common-window read.
   Co-init gives every edge a shared time origin; the common-window rule keeps them aligned
-  every serve. (Wall-clock pacing is visualized separately in Diagram L; per-link delay in
+  every serve. (Wall-clock pacing is visualized separately in Diagram L; per-edge delay in
   Diagram M.)</figcaption>
   </figure>
 
@@ -1640,16 +1640,16 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
 
   <p>Diagrams H and L describe alignment <i>between</i> sources — the same virtual
   time index reaches every ring at the same moment. Diagram M zooms in on what
-  happens <i>after</i> alignment: each per-link leading <code>tdl</code> step
+  happens <i>after</i> alignment: each per-edge leading <code>tdl</code> step
   shifts its source's contribution by an independent per-edge delay
   <span class="mono">d<sub>k</sub></span>, so the same virtual instant arrives
   at different points along each edge's tap timeline.</p>
 
-  <!-- ============ DIAGRAM M : how per-link delay shifts each source at the RX ============ -->
+  <!-- ============ DIAGRAM M : how per-edge delay shifts each source at the RX ============ -->
   <figure>
   <svg viewBox="0 0 1000 330" font-family="SF Mono,Menlo,monospace" font-size="12">
-    <text x="500" y="22" fill="#9aa7bd" text-anchor="middle">Per-link leading tdl step shifts each source's contribution at the receiver</text>
-    <text x="500" y="36" fill="#9aa7bd" text-anchor="middle" font-size="10">d_k encodes both physical propagation distance AND constant TX timing offset — composed into one per-link knob</text>
+    <text x="500" y="22" fill="#9aa7bd" text-anchor="middle">Per-edge leading tdl step shifts each source's contribution at the receiver</text>
+    <text x="500" y="36" fill="#9aa7bd" text-anchor="middle" font-size="10">d_k encodes both physical propagation distance AND constant TX timing offset — composed into one per-edge knob</text>
 
     <!-- virtual time idx ruler -->
     <text x="20" y="60" fill="#9aa7bd" font-size="11">virtual time idx</text>
@@ -1749,7 +1749,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
 
     <!-- Annotation lines: where d_k comes from -->
     <text x="20" y="230" fill="#ffb454" font-size="12">Where d_k comes from (summed per link):</text>
-    <text x="40" y="252" fill="#cdd6e6" font-size="11">·  <tspan fill="#ffb454">propagation delay</tspan>  —  per-link geometry, YAML: propagation_delay_samples on the link</text>
+    <text x="40" y="252" fill="#cdd6e6" font-size="11">·  <tspan fill="#ffb454">propagation delay</tspan>  —  per-edge geometry, YAML: propagation_delay_samples on the link</text>
     <text x="40" y="270" fill="#cdd6e6" font-size="11">·  <tspan fill="#ffb454">tx timing offset</tspan>  —  per-device constant lag, YAML: tx_timing_offset_samples on the device</text>
     <text x="40" y="288" fill="#cdd6e6" font-size="11">·  <tspan fill="#9aa7bd">explicit chain step</tspan>  —  tdl as the chain's first step (single-tap with delay_samples = d_k; see §5)</text>
     <text x="20" y="316" fill="#9aa7bd" font-size="10">Dashed cells = the delay_line tail kept on the host across slot boundaries so even the earliest idx in a slot has a defined delayed lookup.</text>
@@ -1761,32 +1761,32 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   in parallel). At idx = 7 the receiver integrates
   <span class="mono">src 0</span>'s sample 5 (= 7 − d<sub>0</sub>) and
   <span class="mono">src 1</span>'s sample 2 (= 7 − d<sub>1</sub>). d<sub>k</sub>
-  composes propagation distance and constant TX offset into one per-link knob — the
+  composes propagation distance and constant TX offset into one per-edge knob — the
   emulator cannot distinguish them.</figcaption>
   </figure>
 
   <p class="key"><b>Layer 2 in detail — what d<sub>k</sub> bundles together.</b>
   d<sub>k</sub> in the diagram above is the chain-leading sample-delay step on the
-  link, and it absorbs two physically distinct effects. The receiver can't tell
+  edge, and it absorbs two physically distinct effects. The receiver can't tell
   them apart, but the YAML exposes a named knob for each so a topology can express
   each effect cleanly:</p>
   <ul class="tight">
-    <li><b>Propagation delay</b> — a per-link, geometry-driven physical
+    <li><b>Propagation delay</b> — a per-edge, geometry-driven physical
         propagation time. A source farther from the receiver in the topology
         corresponds to a larger contribution. One sample at the OCUDU / srsRAN
         sample rate (≈ 23.04 MS/s) is ~13 m of free-space propagation, so a 100 m
-        link is roughly 8 samples. YAML knob: <code>propagation_delay_samples</code>
-        on the <b>link</b>.</li>
+        edge is roughly 8 samples. YAML knob: <code>propagation_delay_samples</code>
+        on the <b>edge</b>.</li>
     <li><b>TX timing offset</b> — a per-source, constant TX-start-time lag. If a
         radio brought its ZMQ TX socket up later than the others, every sample it
         produces is shifted in virtual time by exactly that constant.
         Indistinguishable from being farther away by the same number of samples,
         so the broker folds it into the same chain-leading delay step. YAML knob:
         <code>tx_timing_offset_samples</code> on the <b>device</b> — applies
-        uniformly to every outgoing link.</li>
+        uniformly to every outgoing edge.</li>
   </ul>
   <p class="key">At load time, <code>fold_link_leading_delays()</code> composes
-  these two knobs with whatever leading <code>tdl</code> step the link's model
+  these two knobs with whatever leading <code>tdl</code> step the edge's model
   already has: if the chain leads with a <code>tdl</code>, every tap's
   <code>delay_samples</code> is shifted by the summed offset (preserving multi-
   tap multipath); otherwise a single-tap <code>tdl</code> is prepended with the
@@ -1797,7 +1797,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   (clock drift, slot misalignment that grows over time, sample-rate mismatch between
   endpoints) is out of scope. d<sub>k</sub> is constant for the life of a serve and
   changes only when the YAML is reloaded — drift would require a runtime-mutable
-  per-link delay, which is on the planned list in <a href="#scope">§22</a>.</p>
+  per-edge delay, which is on the planned list in <a href="#scope">§22</a>.</p>
 
   <p class="key"><b>What this stage guarantees for everything downstream:</b> after this
   step, the broker holds <span class="mono">N</span> per-edge sample arrays that are
@@ -1816,10 +1816,10 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   guaranteed that the <span class="mono">N</span> per-edge sample arrays are
   <b>time-aligned</b> — every edge's sample at index <span class="mono">idx</span>
   represents the same source-time instant, and every array has the same length
-  <span class="mono">serve</span>. (If a per-link leading <code>tdl</code> step
+  <span class="mono">serve</span>. (If a per-edge leading <code>tdl</code> step
   applies, either <code>apply_channel_kernel</code> on device or
   <code>stage_link()</code> on host has already run that step's multi-tap
-  convolution + optional Jakes fading using the per-link <code>delay_line</code>
+  convolution + optional Jakes fading using the per-edge <code>delay_line</code>
   ring for cross-slot history — see <a href="#kernels">§11 Diagram S</a> for
   which path runs when.) <b>Staging is purely a packing step</b> — it takes those
   <span class="mono">N</span> aligned, delay-applied arrays and concatenates them
@@ -1885,11 +1885,11 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   B200). For RTX 5090's wider memory bus, 360 KiB clears L2 in tens of microseconds.</p>
 
   <h2 id="kernels">11. The channel — applied per edge (device kernel by default, host fallback)</h2>
-  <p>The wireless channel <span class="mono">h<sub>(src→dst)</sub>(t, τ)</span> is a <b>per-link</b> object: each incoming edge of an RX node carries its own delay spread, Doppler shift, and LOS K-factor, parameterised by the YAML <code>tdl</code> step plus its optional <code>fading</code> sub-config. The broker applies that channel <b>per edge</b>, before the staged buffer reaches <code>superpose_kernel</code>. The kernel that follows never sees raw, un-channelised IQ from any source.</p>
+  <p>The wireless channel <span class="mono">h<sub>(src→dst)</sub>(t, τ)</span> is a <b>per-edge</b> object: each incoming edge of an RX node carries its own delay spread, Doppler shift, and LOS K-factor, parameterised by the YAML <code>tdl</code> step plus its optional <code>fading</code> sub-config. The broker applies that channel <b>per edge</b>, before the staged buffer reaches <code>superpose_kernel</code>. The kernel that follows never sees raw, un-channelised IQ from any source.</p>
 
-  <p class="key"><b>Per-edge invariant.</b> Multipath and Doppler are applied independently per link, with each link's own delay-line ring and Jakes sub-ray state, before aggregation. The channel <span class="mono">h<sub>(src→dst)</sub>(t, τ)</span> is a property of the link, not the receiver — summing raw IQ before applying the channel would collapse the per-link statistics and is mathematically wrong.</p>
+  <p class="key"><b>Per-edge invariant.</b> Multipath and Doppler are applied independently per edge, with each edge's own delay-line ring and Jakes sub-ray state, before aggregation. The channel <span class="mono">h<sub>(src→dst)</sub>(t, τ)</span> is a property of the edge, not the receiver — summing raw IQ before applying the channel would collapse the per-edge statistics and is mathematically wrong.</p>
 
-  <p>The default path is the <b>device kernel</b> <code>apply_channel_kernel</code> in <code>src/device_channel.cu</code> (Phase 2 D2b + D3 + D4, landed): per-link state lives in <code>DeviceLinkState</code> in GPU global memory, the per-tap Jakes coarse grid is materialised cooperatively in block shared memory at each slot's start, and each output sample is computed by one CUDA thread reading <code>device_source_iq[s->src_index · count + read_idx]</code> + interpolating <span class="mono">g<sub>k</sub>(t<sub>idx</sub>)</span>. The <b>src_index indirection (D4)</b> means edges sharing a source share a single input slot — the host packs each unique source once. H2D bandwidth therefore scales with source count rather than edge count <i>when multiple edges share a source</i>; for current production topologies (one link per (from, to) pair) the byte count is unchanged. See <a href="#perf-pcie">§20.5</a> for the empirical confirmation. The <b>host fallback</b> is <code>stage_link()</code> calling <code>apply_tdl_step{_fading}</code> in <code>delay.h</code> — used when the per-node dispatch gate (<code>CudaSuperposeState::use_device_channel</code>, set in <code>prepare()</code>) doesn't fire, i.e. when an incoming edge has no leading <code>tdl</code> step. Both paths share one numerical specification in <a href="https://github.com/zhouyou-gu/ocudu-gpu-channel/blob/main/include/ocudu_gpu_channel/delay.h"><code>delay.h</code></a>; the CPU↔CUDA fading bit-exact test asserts agreement at <span class="mono">1e-3</span> tolerance. The math itself lives in §6 (Diagrams P / Q / R).</p>
+  <p>The default path is the <b>device kernel</b> <code>apply_channel_kernel</code> in <code>src/device_channel.cu</code> (Phase 2 D2b + D3 + D4, landed): per-edge state lives in <code>DeviceLinkState</code> in GPU global memory, the per-tap Jakes coarse grid is materialised cooperatively in block shared memory at each slot's start, and each output sample is computed by one CUDA thread reading <code>device_source_iq[s->src_index · count + read_idx]</code> + interpolating <span class="mono">g<sub>k</sub>(t<sub>idx</sub>)</span>. The <b>src_index indirection (D4)</b> means edges sharing a source share a single input slot — the host packs each unique source once. H2D bandwidth therefore scales with source count rather than edge count <i>when multiple edges share a source</i>; for current production topologies (one edge per (from, to) pair) the byte count is unchanged. See <a href="#perf-pcie">§20.5</a> for the empirical confirmation. The <b>host fallback</b> is <code>stage_link()</code> calling <code>apply_tdl_step{_fading}</code> in <code>delay.h</code> — used when the per-node dispatch gate (<code>CudaSuperposeState::use_device_channel</code>, set in <code>prepare()</code>) doesn't fire, i.e. when an incoming edge has no leading <code>tdl</code> step. Both paths share one numerical specification in <a href="https://github.com/zhouyou-gu/ocudu-gpu-channel/blob/main/include/ocudu_gpu_channel/delay.h"><code>delay.h</code></a>; the CPU↔CUDA fading bit-exact test asserts agreement at <span class="mono">1e-3</span> tolerance. The math itself lives in §6 (Diagrams P / Q / R).</p>
 
   <h3 id="pipeline">11.0 Pipeline op order — what each stream actually launches</h3>
   <p>Before the per-component deep dives (Diagram S below, then dispatch
@@ -1922,7 +1922,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
         Jakes + Rician LOS per edge. Each thread block reads
         <span class="mono">device_source_iq[s->src_index · count + i]</span>
         — edges sharing a source share the input slot, then apply their
-        own per-link channel state. Writes
+        own per-edge channel state. Writes
         <span class="mono">device_staged[k · count + idx]</span>.</li>
     <li><b><code>update_delay_line_kernel</code></b> — roll each link's
         <span class="mono">delay_line</span> ring forward by
@@ -2050,7 +2050,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   layout; <code>superpose_kernel</code> (§12) downstream is path-agnostic.
   Math + state internals are in the sub-diagrams:
   <a href="#dispatch-gate">SG (gate)</a>,
-  <a href="#link-lifecycle">X (per-link state lifecycle)</a>,
+  <a href="#link-lifecycle">X (per-edge state lifecycle)</a>,
   <a href="#polyphase">Y (8-tap polyphase read)</a>,
   <a href="#ring-continuity">Z (cross-slot ring)</a>,
   <a href="#physics">§6 (channel physics)</a>. CPU↔CUDA agreement at
@@ -2104,8 +2104,8 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   <code>:935</code> (leading-non-tdl ⇒ false).</figcaption>
   </figure>
 
-  <!-- ============ DIAGRAM X: per-link state lifecycle (compact) ============ -->
-  <h3 id="link-lifecycle">11.2 Per-link state lifecycle — prepare once, serve many</h3>
+  <!-- ============ DIAGRAM X: per-edge state lifecycle (compact) ============ -->
+  <h3 id="link-lifecycle">11.2 Per-edge state lifecycle — prepare once, serve many</h3>
   <figure>
   <svg viewBox="0 0 1000 200" font-family="SF Mono,Menlo,monospace" font-size="11">
     <text x="500" y="20" fill="#cdd6e6" text-anchor="middle" font-size="12">Diagram X · DeviceLinkState · built once, mostly read-only, two fields mutate per slot</text>
@@ -2150,7 +2150,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   </svg>
   <figcaption>Diagram X — <code>DeviceLinkState</code> lifecycle. Built once
   in <code>prepare()</code> from the YAML, copied H2D, then immutable
-  except for the per-link <code>delay_line</code> ring and
+  except for the per-edge <code>delay_line</code> ring and
   <code>slot_start_samples</code> counter that the second kernel rolls
   forward each slot. This is what makes the per-edge channel a pure
   function of (state, raw IQ in) → (shaped IQ out, new state) — no
@@ -2259,7 +2259,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   <!-- ============ DIAGRAM Z: cross-slot delay-line ring continuity ============ -->
   <h3 id="ring-continuity">11.4 Cross-slot delay-line ring continuity</h3>
   <p>Multi-tap channels have echoes longer than one slot's worth of input.
-  The per-link <code>delay_line</code> ring keeps the most recent
+  The per-edge <code>delay_line</code> ring keeps the most recent
   <code>dl_size</code> raw input samples around so that the next slot's
   polyphase reads can resolve negative <code>read_idx</code> against history
   instead of zero-padding. The ring is rolled at the END of each slot by
@@ -2621,7 +2621,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
         <code>rx_model</code> once to the sum. The broker uses this for N-edge
         fan-in; the benchmark and unit tests use the same call with a
         one-element <code>edges</code> list (the N = 1 single-edge case) instead
-        of a separate per-link API.</li>
+        of a separate per-edge API.</li>
   </ul>
   <p>Bit-exactness contract: for any single edge,
   <code>process_superposition</code> on CPU and CUDA produces identical
@@ -2654,7 +2654,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   <p>Two state structs hold the broker's signal memory:
   <code>CudaSuperposeState</code> (one per destination node — the broker's
   only hot-path state) and <code>CudaLinkSlot</code> (one per emulator
-  edge, holding the per-link chain phase / AWGN counter / delay_line ring).
+  edge, holding the per-edge chain phase / AWGN counter / delay_line ring).
   The <code>process_superposition</code> call walks every incoming edge's
   <code>CudaLinkSlot</code> to pack the staged buffer, then does one
   fused H2D + kernel + D2H against the per-destination superpose state.</p>
@@ -2717,7 +2717,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   <figcaption>Diagram D — signal memory map for the broker's superposition
   hot path. Pinned host buffers pair with device global buffers; the small
   heap-resident chain metadata gets its H2D piggy-backed on the staged
-  buffer's transfer. <code>CudaLinkSlot</code> holds only the per-link
+  buffer's transfer. <code>CudaLinkSlot</code> holds only the per-edge
   chain-running state (phase / AWGN counter / delay_line) — no scratch.</figcaption>
   </figure>
 
@@ -2815,7 +2815,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   <p>Parts I&ndash;IV describe a broker that reads its YAML once at startup
   and applies the same chain to every slot. This section is about the second
   way channel parameters can change: a live ZMQ control plane that mutates
-  per-link state at slot boundaries without restarting the broker. The data
+  per-edge state at slot boundaries without restarting the broker. The data
   plane stays exactly as Part III describes it &mdash; the control plane
   meets it once per serve, through a lock-free snap at the top of the slot.</p>
 
@@ -2823,7 +2823,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   <b>(1)&nbsp;Latency.</b> Reload requires tearing down sockets and reallocating
   device buffers; that's tens of milliseconds and a brief data outage, which is
   unacceptable during a live UE attach.
-  <b>(2)&nbsp;Atomicity.</b> A reload changes every link at once on whatever
+  <b>(2)&nbsp;Atomicity.</b> A reload changes every edge at once on whatever
   slot the broker happens to be serving when the operator restarts; the control
   plane lets the caller name a <code>take_effect_at_slot</code> so a mutation
   lands at a known point in the UE's experience.
@@ -2833,9 +2833,9 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   the loop closes without polling REP.</p>
 
   <h3 id="rtm-architecture">17.1 Architecture &mdash; two planes that meet at the snap</h3>
-  <p>Every link gets a <code>BrokerLinkControl</code> on the broker side: a
+  <p>Every edge gets a <code>BrokerLinkControl</code> on the broker side: a
   <code>shadow</code> POD that the control thread writes, a <code>live</code>
-  POD that the data plane reads, and a per-link atomic <code>seqno</code>
+  POD that the data plane reads, and a per-edge atomic <code>seqno</code>
   that publishes one to the other. The invariant is
   <b>single&#8209;writer&#8209;per&#8209;link</b>: only the
   <code>ControlServer</code> thread (one per broker process) writes
@@ -2890,7 +2890,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
     <tr><td><code>batch_commit</code></td>
         <td>Flush every staged op with a single
         <code>take_effect_at_slot</code> shared across every link touched
-        (per-link slot-index atomicity).</td>
+        (per-edge slot-index atomicity).</td>
         <td><code>batch_id, take_effect_at_slot?</code></td>
         <td><code>apply_at_slot, link_count</code></td></tr>
     <tr><td><code>batch_abort</code></td>
@@ -2945,7 +2945,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   <code>warmup_slots</code> are explicitly typed as <b>warmup artefacts</b>
   &mdash; the first formal exception to the broker's "every emitted sample
   is meaningful" contract. <code>event=control_warmup_end</code> fires when
-  the per-link <code>current_slot</code> crosses the target; from that slot
+  the per-edge <code>current_slot</code> crosses the target; from that slot
   onward CPU↔CUDA parity is restored bit-exact.</p>
 
   <p>The <code>profile_swap</code> REP body carries
@@ -2958,7 +2958,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   Profile swaps whose prospective warmup span exceeds the cap (default 3
   slots) are rejected at REQ time with a typed error including the computed
   span, <code>dl_size</code>, and slot <code>count</code>. The broker
-  publishes per-link <code>dl_size_samples_hint</code> +
+  publishes per-edge <code>dl_size_samples_hint</code> +
   <code>slot_count_hint</code> at prepare time so the check happens without
   round-tripping through the snap path. <code>--control-warmup-cap-slots 0</code>
   disables the check; warmup span is still emitted via
@@ -2971,7 +2971,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   snap stores and activates the profile, but the per-sample chain has no
   Tdl branch to read it, so kernel output is unchanged. The broker emits
   <code>event=control_force_warning link_id=L reason="chain has no leading
-  tdl; profile stored but inert"</code> and bumps a per-link
+  tdl; profile stored but inert"</code> and bumps a per-edge
   <code>force_inert_warnings</code> counter visible in
   <code>event=stop</code>.</p>
 
@@ -3042,15 +3042,24 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   <p>Three layers, each progressively closer to a live radio integration. The
   detailed test surface is mapped in <a href="#test-architecture">§18.4
   Diagram TA</a> below.</p>
+  <p class="key"><b>Which layer is the testing target for what.</b> The
+  <b>unit tests</b> (§18.1) and the <b>synthetic GPU validation</b> (§18.2)
+  are the targets for the internal build roadmap (the <i>Phase&nbsp;1/2/3</i>
+  work &mdash; correctness, CPU&harr;CUDA parity, kernel behaviour); the
+  <b>live-radio integration</b> smoke (§18.3) is the target for the
+  <i>Milestone&nbsp;A/B/C</i> proof points (a real srsRAN gNB&nbsp;+ srsUE
+  completing attach&nbsp;+ PDU session&nbsp;+ ping through the broker).
+  "Milestone" and "Phase" are two distinct axes &mdash; <i>what works
+  end-to-end</i> vs <i>how it was built</i> &mdash; not competing labels.</p>
 
-  <h3 id="test-layer-unit">18.1 Unit tests (ctest, 4/4)</h3>
+  <h3 id="test-layer-unit">18.1 Unit tests (ctest, 8/8)</h3>
   <p>Run with <code>ctest --test-dir build --output-on-failure</code> after
-  <code>cmake --build</code>. Four targets:</p>
+  <code>cmake --build</code>. The suite (8 targets) groups as:</p>
   <ul class="tight">
     <li><b><code>config</code></b> — YAML schema validation: unknown keys,
         bad numerics, mixed sample rates, negative offsets, the
         <code>tdl</code> taps schema, fading config (<code>f_d_max_hz</code>,
-        spectrum, LOS K-factor + angle), per-link
+        spectrum, LOS K-factor + angle), per-edge
         <code>propagation_delay_samples</code> and per-device
         <code>tx_timing_offset_samples</code> composition,
         <code>fold_link_leading_delays</code> equivalence.</li>
@@ -3095,7 +3104,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   broker or CUDA backend ships.</b> Each step adds a layer:</p>
   <ol class="tight">
     <li>CUDA release build (rsync local tree → build → check exit).</li>
-    <li>ctest 4/4 on the remote box (same suite as §21.1 above, GPU
+    <li>ctest 8/8 on the remote box (same suite as §21.1 above, GPU
         path enabled so all <code>OCUDU_GPU_CHANNEL_HAS_CUDA</code> blocks
         actually run).</li>
     <li>Synthetic CUDA relay loop — clean 0 dB channel, sink measures
@@ -3131,7 +3140,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
 
     <!-- Layer 1: HOST class (runs locally, host-only on CPU build) -->
     <rect x="60" y="40" width="880" height="36" rx="6" fill="#13391f" stroke="#6fd08c" stroke-width="1.6"/>
-    <text x="80"  y="62" fill="#6fd08c" font-size="11">Layer 1 · ctest 4/4</text>
+    <text x="80"  y="62" fill="#6fd08c" font-size="11">Layer 1 · ctest 8/8</text>
     <text x="500" y="62" fill="#cdd6e6" text-anchor="middle" font-size="11">config · ring · processing (largest) · broker</text>
     <text x="920" y="62" fill="#9aa7bd" text-anchor="end" font-size="10">~3 s · per commit</text>
 
@@ -3325,7 +3334,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
     <tr><td><code>event=control_update</code></td>
         <td><code>link_id, param, old, new, seqno</code></td>
         <td>one line per applied runtime update</td>
-        <td>Phase 3 v1 mutable params. Reconstructs every accepted shadow write; the matching server-thread snap happens on the next slot boundary. <code>seqno</code> is per-link monotonic.</td></tr>
+        <td>Phase 3 v1 mutable params. Reconstructs every accepted shadow write; the matching server-thread snap happens on the next slot boundary. <code>seqno</code> is per-edge monotonic.</td></tr>
     <tr><td><code>event=control_error</code></td>
         <td><code>reason="…"</code></td>
         <td>one line per rejected REQ</td>
@@ -3345,19 +3354,19 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
     <tr><td><code>event=control_batch_commit</code></td>
         <td><code>id, link_count, apply_at_slot</code></td>
         <td>one line per batch_commit REQ</td>
-        <td>All staged ops applied with a single <code>take_effect_at_slot</code>; per-link slot-index atomicity (different links may tick at slightly different wall-clock times).</td></tr>
+        <td>All staged ops applied with a single <code>take_effect_at_slot</code>; per-edge slot-index atomicity (different links may tick at slightly different wall-clock times).</td></tr>
     <tr><td><code>event=control_batch_aborted</code></td>
         <td><code>id, dropped_ops</code></td>
         <td>one line per batch_abort REQ</td>
         <td>Caller discarded the staged batch; no shadows touched. The data plane is unaffected.</td></tr>
     <tr><td><code>event=telemetry</code></td>
         <td><code>link_id, slot, seqno, live{…}, profile_active, warmup_until_slot</code></td>
-        <td>per-link, at <code>--telemetry-rate-hz</code></td>
+        <td>per-edge, at <code>--telemetry-rate-hz</code></td>
         <td>Phase 3 v3.0: published on the ZMQ PUB socket (<code>--telemetry-endpoint</code>). Topic prefix = <code>link_id</code>. Not written to stdout; subscribers filter via <code>ZMQ_SUBSCRIBE</code>.</td></tr>
     <tr><td><code>event=control_force_warning</code></td>
         <td><code>link_id, reason</code></td>
         <td>per snap of a profile_swap with <code>force=true</code> on a non-tdl-leading chain</td>
-        <td>Phase 3 v3.1: the profile was stored + activated but the per-sample chain has no Tdl branch to read it. Data-plane output unchanged. Per-link counter <code>force_inert_warnings</code> aggregates these into <code>event=stop</code>.</td></tr>
+        <td>Phase 3 v3.1: the profile was stored + activated but the per-sample chain has no Tdl branch to read it. Data-plane output unchanged. Per-edge counter <code>force_inert_warnings</code> aggregates these into <code>event=stop</code>.</td></tr>
     <tr><td><code>event=hardware_probe</code></td>
         <td><code>ok, device, name, sm, mem_bytes, driver_version, runtime_version</code> (or <code>ok=false error="…"</code>)</td>
         <td>once at broker startup, when the CUDA backend is requested</td>
@@ -3496,7 +3505,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   bench's worst call.</b> §20.6 demonstrates this empirically.</p>
 
   <p class="key"><b>API-unification note</b>: the bench's earlier
-  <code>--mode per-link</code> flag drove a now-removed
+  <code>--mode per-edge</code> flag drove a now-removed
   <code>process_into()</code> entry point — see §2 and §14 for the full
   context. Only <code>process_superposition()</code> exists today; a
   single-edge call is just
@@ -3644,7 +3653,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   the unified <code>process_superposition</code> path. CPU crosses the 500 µs
   slot deadline at 4+ edges. CUDA stays in green through 8 edges and yellow
   at 16. The CPU/CUDA speedup widens with edge count — from 4.6× at the
-  single-link config to 9.9× at the 16-edge stress topology — because the
+  single-edge config to 9.9× at the 16-edge stress topology — because the
   CUDA path fuses all edges into one launch while CPU loops linearly.</figcaption>
   </figure>
 
@@ -3834,11 +3843,11 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   ctest (2 edges from <code>gnb0</code> to <code>ue0</code> through
   different models) verifies the dedup is correct. But the byte-level
   win only materializes when <b>multiple edges within one destination's
-  incoming set share a source</b> (i.e. multiple links exist for the same
-  <code>(from, to)</code> pair, e.g. a desired-path link plus a
-  crosstalk-model link). Every current production topology — including
+  incoming set share a source</b> (i.e. multiple edges exist for the same
+  <code>(from, to)</code> pair, e.g. a desired-path edge plus a
+  crosstalk-model edge). Every current production topology — including
   every TDL profile, the one-to-N fan-in, the multi-gNB graph, and
-  stress-16 — has at most one link per <code>(from, to)</code> pair, so
+  stress-16 — has at most one edge per <code>(from, to)</code> pair, so
   <code>num_sources == link_count</code> at every destination and D4
   saves zero H2D bytes. The post-D4 <code>perf-fanin-sweep</code>
   re-measured H2D at <code>one-to-n_N8</code> at <b>121.0 µs</b> vs the
@@ -4223,11 +4232,11 @@ docker run --rm --gpus all --entrypoint bash ocudu-gpu-channel:build \
         <code>integer_delay</code>, and <code>fractional_delay</code> step
         types were subsumed by <code>tdl</code> in Phase 1.3 and no longer
         exist in the schema. <code>tdl</code> also carries an optional
-        <code>fading:</code> sub-config (Phase 1.4): per-link
+        <code>fading:</code> sub-config (Phase 1.4): per-edge
         <span class="mono">f<sub>d,max</sub></span>, per-tap Jakes
         sum-of-sinusoids, optional per-tap Rician LOS specular. Gaussian
         / Flat spectra are reserved in the schema but not yet implemented.</li>
-    <li>Per-link delay knobs that fold into a chain-leading <code>tdl</code>
+    <li>Per-edge delay knobs that fold into a chain-leading <code>tdl</code>
         at config-load time: <code>device.tx_timing_offset_samples</code>
         (per source) and <code>link.propagation_delay_samples</code>
         (per edge). The composed offset shifts every existing tap's
@@ -4276,9 +4285,9 @@ docker run --rm --gpus all --entrypoint bash ocudu-gpu-channel:build \
 
   <h3>Planned — operational flexibility</h3>
   <ul class="tight">
-    <li><b>Mixed-sample-rate links via per-link resampling.</b> Today the
+    <li><b>Mixed-sample-rate edges via per-edge resampling.</b> Today the
         validator rejects topologies where source and destination
-        <code>sample_rate_hz</code> differ. A small per-link polyphase
+        <code>sample_rate_hz</code> differ. A small per-edge polyphase
         resampler at the broker would let asymmetric stacks (e.g., a
         23.04 MS/s gNB and a 30.72 MS/s probe) talk through the same
         emulator. Compute cost is bounded; the bigger work is the variable
@@ -4296,7 +4305,7 @@ docker run --rm --gpus all --entrypoint bash ocudu-gpu-channel:build \
   the dominant per-call latency is gone for any all-leading-tdl
   topology. The per-edge PCIe duplication is gone in principle, but
   doesn't reduce bytes in current production topologies because each
-  (from, to) pair has at most one link (see <a href="#perf-pcie">§20.5</a>).
+  (from, to) pair has at most one edge (see <a href="#perf-pcie">§20.5</a>).
   The remaining frontier work is now smaller per-µs trims. See
   <code>docs/plans/device-channel-pipeline.md</code> for the measured
   pre / post numbers.</p>
@@ -4355,7 +4364,7 @@ docker run --rm --gpus all --entrypoint bash ocudu-gpu-channel:build \
     <li><b>Distributed IQ across hosts.</b> Today the broker and radios
         must be co-located (<a href="https://github.com/zhouyou-gu/ocudu-gpu-channel/blob/main/docs/distributed.md">docs/distributed.md</a>).
         A second broker hop over RDMA-class networking would let the
-        emulator scale across nodes. Out of scope for now — the per-link
+        emulator scale across nodes. Out of scope for now — the per-edge
         latency budget on a wired LAN is already tight; over IP fabric
         it's almost certainly impossible at slot cadence.</li>
   </ul>

@@ -16,32 +16,33 @@ kernel design, profiling, and performance numbers, see the
 
 ## Status
 
-What's proven end-to-end on an RTX 5090 against the OCUDU + srsUE stack:
+What's proven end-to-end on an RTX 5090 against the OCUDU + srsUE stack.
+
+**Two naming axes, kept distinct so they don't read as competing.**
+*Milestone A/B/C* are the live-radio proof points — what works end-to-end,
+validated by the **live-radio integration** smokes (`ocudu-*-smoke.sh`).
+*Phase 1/2/3* are the internal build roadmap — how it was built, validated by
+the **unit tests** (`ctest`) and the **synthetic GPU validation**
+(`gpu-test-sequence.sh`). The three test layers are summarised under
+[Remote RTX workstation](#remote-rtx-workstation) below.
 
 - **Milestone A — single UE attach.** OCUDU gNB ↔ CUDA broker ↔ srsUE:
   `rrc_connected=1`, `pdu_session_established=1`, IP ping OK; broker
   data-integrity counters all zero; 0 gNB `Real-time failure in RF: overflow`.
 - **Milestone B — multi-UE on one cell.** Two srsUEs through one gNB over a
-  realistic per-UE channel (per-link path-loss + phase + AWGN); both attached
+  realistic per-UE channel (per-edge path-loss + phase + AWGN); both attached
   with distinct C-RNTIs and PDU sessions.
 - **Milestone C — multi-gNB with interference.** Two OCUDU gNBs + two srsUEs
-  (one per cell) on a 4-node / 8-link inter-cell-interference topology; each
+  (one per cell) on a 4-node / 8-edge inter-cell-interference topology; each
   gNB's RX is the GPU superposition of its serving UE plus the other cell's
   interferer; both UEs attach to their own cell.
 - **Phase 2 device channel pipeline — TR 38.901 profiles realtime-fit.** The
   per-edge channel (multi-tap convolution + Jakes Doppler + Rician LOS) runs
   on the GPU by default via `apply_channel_kernel`; host `stage_link()` stays
-  as the CPU reference and the CUDA fallback. `tdl-a_E16` (1 gNB + 8 UEs,
-  TDL-A 23-tap + Jakes 100 Hz on all 16 edges) went from 58 430 µs (host) to
-  319 µs (device) — 183× speedup, well inside the 1 ms slot budget. **D4
-  source rebuffering** (latest): H2D bytes per slot scale with unique source
-  count instead of edge count — edges sharing a source share one
-  `device_source_iq` slot via `DeviceLinkState::src_index`. The mechanism is
-  in place and tested (new ctest verifies dedup + 1e-3 parity), but the
-  saving is dormant on current production topologies (which have one link
-  per `(from, to)` pair, so `num_sources == link_count` per destination);
-  measured H2D at `one-to-n_N8` is 121 µs (was 119 µs pre-D4 — noise).
-  Future-proofs multi-model-per-pair topologies.
+  as the CPU reference and the CUDA fallback. Moving it host → device took the
+  per-edge channel for `tdl-a_E16` (1 gNB + 8 UEs, TDL-A 23-tap + Jakes 100 Hz
+  on all 16 edges) from **58 430 µs → 319 µs** (≈180×) — well inside the 1 ms
+  slot budget.
 
 **Supported chain steps today:** `tdl` (tapped delay line — covers
 scalar gain, integer or fractional sample delay, full multi-tap multipath,
@@ -54,7 +55,7 @@ device kernel by default.
 **Next:** full CDL (TR 38.901 §7.7.1) with per-cluster angles, polarisation,
 and antenna array response, once a real MIMO / beamforming use case
 surfaces. See
-[technical reference §19](docs/index.html#scope) for the
+[technical reference §22](docs/index.html#scope) for the
 architecture and decisions; the Phase 2 device pipeline plan + measured
 record lives in
 [`docs/plans/device-channel-pipeline.md`](docs/plans/device-channel-pipeline.md).
@@ -89,7 +90,7 @@ Note: srsRAN's own ZMQ driver is a raw IQ pipe with no channel impairments — o
 - **CUDA backend** — fused `superpose_kernel` that walks every incoming edge of
   a node and accumulates per-edge channel shaping into one RX signal per slot.
 - **CPU reference backend** — same step set, used by tests and local development.
-- Example topologies in [`examples/`](examples/): single-link MVP, 3-node
+- Example topologies in [`examples/`](examples/): single-edge MVP, 3-node
   interference + crosstalk graph, 2-cell / 4-node multi-gNB, multi-UE OCUDU
   Docker, 16-edge stress, and TR 38.901 §7.7.2 TDL-A through TDL-E profiles.
 
@@ -104,7 +105,7 @@ Open four terminals: two synthetic IQ sources, the broker, two paced sinks.
 # Terminal 2: source for TX endpoint 2
 ./build/ocudu-zmq-source --endpoint tcp://*:2101 --duration 20s
 
-# Terminal 3: broker — runs CUDA channel kernels per slot
+# Terminal 3: broker — applies the channel per slot (CPU backend in this local example)
 ./build/ocudu-gpu-channel --config examples/topology.local.cpu.yaml --duration 20s
 
 # Terminal 4: paced sinks (one request per 1 ms at 23.04 MS/s)
@@ -184,14 +185,14 @@ inject scheduling stalls). The deeper [technical reference
 # CPU reference (any platform)
 ./build/ocudu-gpu-channel-bench --config examples/topology.local.cpu.yaml --duration 10s --scs-khz 30
 
-# CUDA MVP (adds per-stage GPU timings)
+# CUDA backend (adds per-stage GPU timings)
 ./build/ocudu-gpu-channel-bench --config examples/topology.mvp.cuda.yaml --duration 10s --scs-khz 30
 ```
 
 CUDA output emits `model_mix_latency` plus `h2d_us`, `kernel_us`, `d2h_us`,
 `gpu_process_us`. The per-slot gate (green / yellow / red), the methodology,
 and the measured fan-in scaling live in
-[technical reference §21](docs/index.html#perf).
+[technical reference §20](docs/index.html#perf).
 
 Strict-realtime validation (fails the process on any flow / starvation /
 continuity error):
@@ -202,7 +203,12 @@ continuity error):
 
 ## Remote RTX workstation
 
-The remote GPU path is user-space only — no root needed:
+The project is validated in **three test layers**: **unit tests** (`ctest`,
+hardware-free — parity, control plane, broker), **synthetic GPU validation**
+(`gpu-test-sequence.sh`, 7 steps on the RTX 5090 — no live radio), and
+**live-radio integration** (`ocudu-*-smoke.sh` — the Milestone A/B/C attaches
+through a real srsRAN gNB + srsUE). The remote GPU path is user-space only — no
+root needed:
 
 ```sh
 ./scripts/remote/bootstrap-user-tools.sh        # CMake + CUDA 12.8.1 + ZeroMQ under ~/ocudu-gpu-channel-workspace/tools/
@@ -224,7 +230,7 @@ End-to-end-validated topologies:
 - Single-cell, single-UE: [`examples/topology.ocudu-docker.cuda.yaml`](examples/topology.ocudu-docker.cuda.yaml)
 - Multi-UE, one cell, realistic per-UE channel: [`examples/topology.ocudu-docker.multi-ue.cuda.yaml`](examples/topology.ocudu-docker.multi-ue.cuda.yaml)
 - 3-node interference + crosstalk graph: [`examples/topology.graph.cuda.yaml`](examples/topology.graph.cuda.yaml)
-- 2-cell / 4-node / 8-link multi-gNB: [`examples/topology.multi-gnb.cuda.yaml`](examples/topology.multi-gnb.cuda.yaml)
+- 2-cell / 4-node / 8-edge multi-gNB: [`examples/topology.multi-gnb.cuda.yaml`](examples/topology.multi-gnb.cuda.yaml)
 
 Synthetic-loop validation matches the analytic superposition to < 0.3 % on real
 GPU runs, with all broker data-integrity counters at zero.
