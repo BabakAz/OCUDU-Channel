@@ -62,11 +62,14 @@ record lives in
 
 ## Where this fits
 
-Adjacent tools cover offline link-level simulation, offline channel-impulse-response generation, offline 3D ray-tracing, system-level discrete-event simulation, SDR flowgraph toolkits, in-loop CPU simulators tied to specific 5G stacks, and commercial RF↔RF hardware emulators. ocudu-gpu-channel fills the gap they leave — *the GPU-accelerated, ZMQ-native channel emulator for live srsRAN and OCUDU stacks at slot cadence.*
+Adjacent tools cover offline link-level simulation, offline channel-impulse-response generation, offline 3D ray-tracing, system-level discrete-event simulation, SDR flowgraph toolkits, in-loop CPU simulators tied to specific 5G stacks, software and FPGA channel emulators for real stacks, and commercial RF↔RF hardware emulators. ocudu-gpu-channel fills the gap they leave — *the GPU-accelerated, ZMQ-native channel emulator for live srsRAN and OCUDU stacks at slot cadence.*
 
 | Tool | Category | Stack | Channel models | In-loop with live radio stacks? |
 |---|---|---|---|---|
 | **ocudu-gpu-channel** | Real-time GPU emulator | C++ / CUDA + ZMQ | Multi-tap delay, path-loss, phase, CFO, AWGN, Jakes fading + Rician LOS (TR 38.901 §7.7.2 TDL-A..E) — channel runs on the GPU by default | **Yes** — OCUDU / srsRAN via ZMQ on a 1 ms slot budget |
+| [ACHEM](https://arxiv.org/abs/2604.04742) (arXiv 2026) | Software (CPU) channel emulator / digital twin | Software, USRP-oriented | I/Q-level multipath, mobility, antenna patterns | Yes — validated with GNU Radio, srsRAN 4G/5G, OAI; CPU, scenario replay (no GPU/FPGA) |
+| [Colosseum / MCHEM](https://arxiv.org/abs/2110.10617) (MobiCom 2021) | FPGA hardware-in-the-loop emulator | 256 USRP SDRs + FPGA | FIR-tap fading / multipath, up to 256×256 channels | Yes — hardware-in-the-loop, full stacks; shared testbed, not a drop-in box |
+| [OpenAirLink](https://arxiv.org/abs/2404.09660) (arXiv 2024) | SDR/FPGA channel emulator | SDR + FPGA | Path-loss + propagation delay via FIR | Reproducible SDR-to-SDR emulation; FPGA-bound |
 | [OAI rfsimulator](https://github.com/OPENAIRINTERFACE/openairinterface5g/blob/develop/radio/rfsimulator/README.md) | In-loop CPU simulator | C | AWGN + OAI Raytracing Channel Emulator | Yes — only inside the OAI 5G stack, CPU-bound |
 | [GNU Radio](https://www.gnuradio.org/) | SDR flowgraph toolkit | C++ / Python | Composable `channels.*` blocks (DIY) | Yes — bring your own SDR or virtual sink |
 | [Keysight PROPSIM](https://www.keysight.com/us/en/products/channel-emulators/propsim-platforms.html) / [Spirent Vertex](https://www.spirent.com/products/vertex-channel-emulator) | Commercial RF hardware emulator | Proprietary firmware | 3GPP CDL/TDL, MIMO, full fading at RF | Yes — RF↔RF, commercial pricing |
