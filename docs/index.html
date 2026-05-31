@@ -624,7 +624,7 @@
   <p>The topology is a directed graph: nodes are devices (gNBs and UEs); edges are channel
   edges between them, each with a named <code>model</code>. The broker reads
   <code>examples/topology.*.yaml</code>, builds one server thread per node, and one
-  <code>CudaLinkSlot</code> per link. The 3-node example below
+  <code>CudaLinkSlot</code> per edge. The 3-node example below
   (<code>examples/topology.graph.cuda.yaml</code>) carries both <b>desired</b> edges (downlink
   + uplink) and <b>crosstalk</b> edges (UE↔UE leakage).</p>
   <figure>
@@ -819,7 +819,7 @@ models:     desired:     [ tdl{(0, -3 dB, 0)} · phase 0.1 rad · cfo 150 Hz ]
   TDL profiles (TR 38.901 §7.7.2 tables 7.7.2-1 through 7.7.2-5),
   2-ray ground-reflection, indoor multipath. Memory cost is roughly the
   same as a single-tap edge today and <b>~24× lower</b> than the naive
-  "N parallel edges per link" approach for a 23-tap TDL-A profile,
+  "one parallel edge per tap" approach for a 23-tap TDL-A profile,
   because the cross-slot history is one ring per edge rather than one
   per tap.</p>
 
