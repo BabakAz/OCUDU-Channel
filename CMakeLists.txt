@@ -88,6 +88,17 @@ target_link_libraries(ocudu-zmq-source PRIVATE ocudu_gpu_channel_lib)
 add_executable(ocudu-zmq-sink apps/ocudu_zmq_sink.cpp)
 target_link_libraries(ocudu-zmq-sink PRIVATE ocudu_gpu_channel_lib)
 
+# Microbench for the runtime-mutation cost M (the D2H + stream-sync + H2D the
+# current control path runs per dirty edge). CUDA-only; not a ctest -- runs on
+# the GPU workstation. See tests/bench_mutation_cost.cu.
+if(OCUDU_GPU_CHANNEL_HAS_CUDA)
+  add_executable(bench-mutation-cost tests/bench_mutation_cost.cu)
+  target_link_libraries(bench-mutation-cost PRIVATE ocudu_gpu_channel_lib)
+  set_target_properties(bench-mutation-cost PROPERTIES
+    CUDA_ARCHITECTURES "${OCUDU_GPU_CHANNEL_CUDA_ARCHITECTURES}"
+  )
+endif()
+
 if(OCUDU_GPU_CHANNEL_BUILD_TESTS)
   enable_testing()
 
