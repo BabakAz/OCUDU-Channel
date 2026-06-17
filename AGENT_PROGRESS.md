@@ -6,7 +6,8 @@
 
 - Branch: `main`.
 - Initial repository contents before setup: `.git` only.
-- **32 commits ahead of `origin/main` (Phase 3 v1 + v2 + v3 + publish-prep + post-audit cleanups landed locally; not yet pushed).** Working tree clean as of `f9ac902`. Tests: all 8 ctest cases green on the CPU-only macOS build (CUDA paths compile but await GPU-workstation validation).
+- This checkout is at `76cf932`, aligned with `origin/main`; tracked working tree
+  was clean before the 2026-06-15 validation-log update.
 - Current ignored local artifacts: `.config`, `build*/`, `.claude/`, `.playwright-mcp/`, `references/`, `writing/`.
 - Remote: `origin` points to `https://github.com/zhouyou-gu/ocudu-gpu-channel.git`, with setup pushed to `origin/main`.
 - Current ignored local config: `.config` contains the GPU workstation connection settings.
@@ -25,7 +26,8 @@
 - OCUDU interop assets: `docs/ocudu-interop.md`, `examples/ocudu/gnb_zmq_b210_fdd_srsue.yml`, `examples/topology.ocudu-docker.cuda.yaml`, `scripts/remote/ocudu-interop-smoke.sh`, and `scripts/remote/ocudu-attach-smoke.sh` exist locally as uncommitted work.
 - Remote helpers: `scripts/remote/` contains local scripts for sourcing `.config`, initializing the remote workspace, probing dependencies, and syncing a pushed branch.
 - Remote user-space tools: `/home/zhouyou/ocudu-gpu-channel-workspace/tools/env.sh` exists and points to user-space CMake 3.31.12, CUDA Toolkit 12.8.1, and ZeroMQ 4.3.5.
-- Generated build artifacts: local `build/`, `build-release/`, and `build-review/` are ignored.
+- Generated build artifacts include ignored `build-validation/`,
+  `build-cuda-default/`, and `build-cuda-sm89/` directories on the L40 host.
 
 ## Completed Changes
 
@@ -272,6 +274,37 @@ Progress entry template
 - [Review-and-fix pass] Acting on the multi-agent review's info findings: removed unused `git` from the Dockerfile build stage (the build is `COPY . /src` + cmake, no git ops; `.dockerignore` excludes `.git` anyway); fixed 4 stale `tests/test_runtime_update_parity.cpp` comments that described the link key as bare `"gnb0>ue0"` (canonical is `"gnb0>ue0:<model_id>"` via `test_link_key()`; the `log.find("link_id=gnb0>ue0")` substring assertions are correct and unchanged); removed 5 untracked CFO-sweep scratch topologies from `examples/` (curated demo dir). macOS `ctest` 8/8 still passes.
 - [Phase 1.4b] The fading kernel landed in commit `e48e95c`; remote `gpu-test-sequence.sh` 6/6 passed on it. `include/ocudu_gpu_channel/delay.h` gained `kTdlFadingSinusoids = 20`, a `TdlFadingState` per-link struct, `prepare_tdl_fading_state` (draws M sub-ray angles + M initial phases + per-tap LOS phase deterministically from `std::mt19937_64` seeded by `hash("<link_key>:fading:<step_idx>")` -- both backends compute the same seed so the realisations come from the same random sequence), and `apply_tdl_step_fading` (coarse-grid Jakes generator with phase accumulation = one complex multiply per sub-ray per grid step, linear interpolation up to per-sample resolution, optional LOS specular composed via Rician `[sqrt(K/(K+1)), sqrt(1/(K+1))]` factors with a per-sample phase accumulator -- no per-sample trig anywhere in the kernel). `fading_grid_us` default corrected from 1.0 us (paste-from-§19 typo, would have demanded 23 kHz grid for 23-tap CDL-A) to 100.0 us (10 kHz, ~28x oversampling vs 350 Hz Jakes; bounds per-slot sinusoid count comfortably under the 1 ms slot budget). Gaussian / Flat spectra throw "not implemented yet" inside `apply_tdl_step_fading`; schema accepts them so future generator math can drop in without schema churn. CPU `prepare_tdl_step` and CUDA `configure_leading_propagation` both extended to call `prepare_tdl_fading_state` with the shared seed; CUDA `stage_link` extended to take `sample_rate_hz` and dispatch to `apply_tdl_step_fading` when `tdl_fading.enabled`. CPU `case ModelStepType::Tdl` does the same dispatch. Three new behaviour tests in test_processing.cpp: (a) `f_d_max=0` stationary case -- g_k collapses to a complex constant so two consecutive slots with the same input produce identical output after the kernel transient; (b) determinism -- two processors with the same model + same link key + same input produce bit-identical output across two slots, exercising the `slot_start_samples` accumulator; (c) strong LOS (K = 40 dB) on a stationary specular -- output magnitude stays within +/- 5% of 1 on a unit-power input. Heavier statistical tests (autocorrelation matches Bessel J0, full Rician envelope distribution) deferred to Phase 1.4.5; the three checks here cover the operational correctness surface. Local `ctest` 4/4; remote 6/6.
 
+- [Validation] On 2026-06-15, installed user-space CMake 3.31.12, CUDA Toolkit
+  12.8.1, and ZeroMQ 4.3.5 under `/home/babak/.local/ocudu-gpu-tools` and
+  validated this checkout on an NVIDIA L40 (SM 89).
+- [Validation] CPU-only and SM 89 CUDA builds each passed 8/8 CTests. The
+  default SM 120 CUDA build compiled but `runtime_update_parity` and
+  `processing` aborted on the L40 with `no kernel image is available for
+  execution on the device`.
+- [Validation] The SM 89 TDL-A benchmark at 23.04 MS/s reported p99 234.319 us
+  and max 650.477 us against a 1 ms slot. A strict hardware-strict synthetic
+  relay on ports 2000/2001/4000/4001 served 184,296,960 samples to each sink
+  with zero starvation, overflow, sequence-gap, ZMQ-error, and telemetry-drop
+  counters.
+- [Integration Finding] The sibling telemetry integration assumes short link
+  IDs `gnb0-ue0` / `ue0-gnb0`, while this broker's canonical `link_key()` emits
+  `gnb0>ue0:dl` / `ue0>gnb0:ul` for that topology. The short ID was rejected on
+  both CPU and CUDA wire tests; the canonical ID applied and appeared in PUB
+  telemetry with the incremented sequence number.
+- [Validation] On 2026-06-16, revalidated the SM 89 CUDA build on the L40:
+  upstream CTests passed 8/8, the upstream one-gNB/two-UE CUDA topology
+  benchmarked at p99 219.400 us, and the sibling Telemetry multi-UE topology
+  benchmarked at p99 219.529 us against a 1 ms slot.
+- [Validation] The upstream exact-port one-gNB/two-UE relay passed strict mode:
+  `tx_pulls=11550`, `rx_requests=11236`, `rx_starvations=0`,
+  `tx_queue_overflows=0`, `tx_sequence_gaps=0`, `zmq_errors=0`, and
+  `telemetry_drops=0`.
+- [Integration Finding] App-level REQ/SUB probes against
+  `ocudu-gpu-channel --control-endpoint ... --telemetry-endpoint ...` timed out
+  on the local L40 host (`control_msgs_received=0`) even though
+  `test_control_server` still passes. Treat live app-wire control/PUB as an
+  open follow-up.
+
 ## Blockers and Risks
 
 - Remote dependency gap: `iperf3` is still missing on the RTX workstation under the user-space-only constraint.
@@ -311,6 +344,11 @@ Progress entry template
 - **Publish-prep landed alongside Phase 3** (commits `666274b`..`9de33e8` includes): renamed `docs/ocudu-gpu-channel-doc.html` → `docs/index.html`; added favicon.svg + og-image.svg + meta tags; `.nojekyll` + workflow_dispatch-gated GH Pages workflow (`.github/workflows/pages.yml`); README points at the Pages URL with local-clone fallback. Repo still PRIVATE and Pages NOT enabled per user's explicit "set up locally only" call.
 - **Doc is current as of commit `9de33e8`** (`docs/index.html`). §13 mutability note + §19.1 event vocabulary table grew through v1/v2/v3 work; §21 'Done — operational flexibility' lists each landed sub-phase with scope notes; all 59 internal anchors resolve.
 - **Next resume points** (Phase 3 fully landed + fully validated + doc restructured):
+  - **Telemetry integration contract** -- coordinate with the sibling
+    `OCUDU-Telemetry` repository so its scenarios, sweep, truth calibration,
+    exporter, Grafana queries, tests, and docs consume the canonical broker
+    link key. Add a wire-level contract test that reuses a live PUB frame's
+    `link_id` in a control request.
   - **GH Pages enablement** — the workflow at `.github/workflows/pages.yml` is workflow_dispatch-gated and the repo is currently still PRIVATE. To publish, flip the repo to Public (or upgrade to a Pages-eligible plan), then enable Pages in repo Settings → Pages → Source = "GitHub Actions" and trigger the workflow once. The doc is ready (`docs/index.html` is the entry, `docs/og-image.svg` is the OG card, `.nojekyll` present).
   - **Live-broker telemetry PUB exercise** — the only Phase 3 surface still untested at the wire level. `gpu-test-sequence.sh` covers the kernel + control-plane paths, Milestones A/B/C cover the live attach, but no test subscribes to `tcp://*:5560` against a live broker. Would need a small SUB sanity script or extend an existing smoke.
   - `--control-warmup-cap-slots` flag implemented (was the last plan-named v2.2 deferral); see commit `<TODO>`.
